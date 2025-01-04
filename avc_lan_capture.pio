@@ -1,0 +1,107 @@
+.program avc_lan_capture
+
+; Захватывает входящие биты с пина и сохраняет их в RX FIFO
+; Захватывает входящие биты с пина и не сохраняет их в RX FIFO
+
+loop:
+    in pins, 1      ; Считываем значение пина (1 бит)
+    ; push block      ; Отправляем данные в FIFO
+    jmp loop        ; Повторяем цикл
+
+; .program avc_lan_capture
+; .side_set 1 opt
+
+; ; Ожидание начала передачи (стартового бита)
+; wait_for_start_bit:
+;     wait 1 pin, 0    ; Ждем падение уровня до 0
+;     set x, 8         ; Установка максимального таймера для Preparation (8 мкс)
+; prep_loop:
+;     jmp x-- wait_sync  ; Декремент таймера
+;     wait 0 pin, 0    ; Проверяем, остаётся ли сигнал в 0
+;     jmp prep_loop
+
+; wait_sync:
+;     wait 1 pin, 1    ; Ждем подъем уровня до 1
+;     set y, 21        ; Установка максимального таймера на Sync (21 мкс)
+; sync_loop:
+;     jmp y-- read_data_bits  ; Декремент таймера
+;     wait 0 pin, 1    ; Проверяем, остаётся ли сигнал в 1
+;     jmp sync_loop
+
+; read_data_bits:
+;     set x, 14        ; Установка максимального таймера для чтения бита данных (14 мкс)
+; data_bit_loop:
+;     jmp x-- end_read_data  ; Декремент таймера
+;     wait 0 pin, 1    ; Проверяем, остаётся ли сигнал в 1
+;     jmp data_bit_loop
+
+; end_read_data:
+;     in pins, 1       ; Чтение бита данных
+;     push block       ; Запись бита в FIFO
+
+;     jmp wait_for_start_bit  ; Возврат к ожиданию стартового бита
+
+
+
+; .program avc_lan_capture
+; .side_set 1 opt
+
+; ; Ожидание начала передачи
+; wait_for_start_bit:
+;     wait 1 pin, 1    ; Ждем подъем уровня до 1
+
+; ; Чтение стартового и броадкаст бита
+; read_header:
+;     in pins, 2       ; Считываем 2 бита (Header Start и Broadcast)
+;     push block       ; Запись в FIFO
+
+; ; Чтение адресных полей
+; read_addresses:
+;     in pins, 13      ; Считываем 13 бит (Master Address + дополнительный бит)
+;     push block
+;     in pins, 14      ; Считываем 14 бит (Slave Address + 2 дополнительных бита)
+;     push block
+
+; ; Чтение контрольного поля и длины данных
+; read_control_and_length:
+;     in pins, 6       ; Control Field + 2 дополнительных бита
+;     push block
+;     in pins, 10      ; Data Length Field + 2 дополнительных бита
+;     push block
+;     mov x, osr       ; Сохраняем длину данных в регистр X для использования в цикле
+
+; ; Чтение данных
+; read_data:
+;     jmp x-- exit     ; Проверяем, все ли данные считаны
+;     in pins, 10      ; Считываем 10 бит (8 бит данных + 2 дополнительных бита)
+;     push block
+;     jmp read_data
+
+; exit:
+;     jmp wait_for_start_bit  ; Возврат к началу для чтения следующего сообщения
+
+
+; .program avc_lan_start_bit
+; .side_set 1 optional
+
+; ; Ожидание низкого уровня сигнала
+; wait_for_low:
+;     wait 1 pin, 0    ; Ждем пока пин уйдет в ноль
+;     set y, 31        ; Счётчик для максимального времени ожидания
+
+; count_low:
+;     jmp pin, wait_for_high  ; Если пин вернулся в высокий уровень, перейти к следующему этапу
+;     jmp y--, count_low     ; Уменьшаем счётчик и ждем
+
+; ; Ожидание высокого уровня сигнала
+; wait_for_high:
+;     set x, 31        ; Счётчик для максимального времени ожидания
+
+; count_high:
+;     jmp pin, exit    ; Если пин вернулся в низкий уровень, перейти к завершению
+;     jmp x--, count_high   ; Уменьшаем счётчик и ждем
+
+; ; Выход из программы, стартовый бит обнаружен
+; exit:
+;     irq set 0        ; Устанавливаем прерывание для уведомления о стартовом бите
+
