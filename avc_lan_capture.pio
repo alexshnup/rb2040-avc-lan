@@ -6,7 +6,7 @@
 .pio_version 0 // only requires PIO version 0
 
 .program differential_manchester_tx
-.side_set 1 opt
+.side_set 2 opt
 
 ; Transmit one bit every 16 cycles. In each bit period:
 ; - A '0' is encoded as a transition at the start of the bit period
@@ -18,27 +18,28 @@
 public start:
 initial_high:
     out x, 1                     ; Start of bit period: always assert transition
-    jmp !x high_0     side 1 [6] ; Test the data bit we just shifted out of OSR
+    jmp !x high_1     side 0b01 ; Test the data bit we just shifted out of OSR
+    jmp !x high_1     side 0b01 ; Test the data bit we just shifted out of OSR
 high_1:
     nop
-    jmp initial_high  side 0 [6] ; For `1` bits, also transition in the middle
-high_0:
-    jmp initial_low          [7] ; Otherwise, the line is stable in the middle
+    jmp initial_high  side 0b10 ; For 1 bits, also transition in the middle
 
 initial_low:
     out x, 1                     ; Always shift 1 bit from OSR to X so we can
-    jmp !x low_0      side 0 [6] ; branch on it. Autopull refills OSR for us.
+    jmp !x low_1      side 0b01 ; branch on it. Autopull refills OSR for us.
 low_1:
     nop
-    jmp initial_low   side 1 [6] ; If there are two transitions, return to
-low_0:
-    jmp initial_high         [7] ; the initial line state is flipped!
+    jmp initial_low   side 0b01 ; If there are two transitions, return to
 
 % c-sdk {
 static inline void differential_manchester_tx_program_init(PIO pio, uint sm, uint offset, uint pin, float div) {
-    pio_sm_set_pins_with_mask(pio, sm, 0, 1u << pin);
-    pio_sm_set_consecutive_pindirs(pio, sm, pin, 1, true);
     pio_gpio_init(pio, pin);
+    pio_gpio_init(pio, pin + 1);
+    pio_sm_set_consecutive_pindirs(pio, sm, pin, 2, true);
+    // pio_sm_set_pins_with_mask(pio, sm, 0, 1u << pin);
+    // Можно сразу сбросить в 0, если хотим, чтобы при старте они были низкими
+    pio_sm_set_pins_with_mask(pio, sm, 0,
+                              (1u << pin) | (1u << (pin + 1)));
 
     pio_sm_config c = differential_manchester_tx_program_get_default_config(offset);
     sm_config_set_sideset_pins(&c, pin);
@@ -52,103 +53,54 @@ static inline void differential_manchester_tx_program_init(PIO pio, uint sm, uin
     pio_sm_set_enabled(pio, sm, true);
 }
 %}
-
+.program differential_manchester_rx
 
 ; Assumes line is idle low
 ; One bit is 16 cycles. In each bit period:
 ; - A '0' is encoded as a transition at time 0
 ; - A '1' is encoded as a transition at time 0 and a transition at time T/2
-
+;
 ; The IN mapping and the JMP pin select must both be mapped to the GPIO used for
 ; RX data. Autopush must be enabled.
 
-; ; Ждем начала сигнала
-; public start:
-;     wait 1 pin, 0 side 0   ; Ждем подъема сигнала
-;     set x, 1               ; Устанавливаем 1 в регистр x через osr
-;     mov osr, x             ; Загружаем значение x в osr для отправки
-;     push noblock           ; Отправляем значение в FIFO
+public start:
+initial_high:           ; Find rising edge at start of bit period
+    wait 1 pin, 0  [11] ; Delay to eye of second half-period (i.e 3/4 of way
+    jmp pin high_0      ; through bit) and branch on RX pin high/low.
+high_1:
+    in x, 1             ; Second transition detected (a `1` data symbol)
+    jmp initial_high
+high_0:
+    in y, 1 [1]         ; Line still high, no centre transition (data is `0`)
+    ; Fall-through
 
-;     wait 0 pin, 0 side 0   ; Ждем падения сигнала
-;     set x, 2               ; Устанавливаем 2 в регистр x через osr
-;     mov osr, x             ; Загружаем значение x в osr для отправки
-;     push noblock           ; Отправляем значение в FIFO
-
-;     jmp start              ; Переход на начало программы для нового измерения
-.program test
-; We mark wrap boundaries so the code loops from .wrap back to .wrap_target
 .wrap_target
-main:
-    ; Wait for pin to be HIGH
-wait_for_rise:
-    jmp pin, got_rise     ; If pin == 1, jump
-    jmp wait_for_rise     ; Otherwise keep waiting
-
-got_rise:
-    set x, 0
-    mov x, ~x    ; x = 0xFFFFFFFF
-
-count_high:
-    jmp pin, keep_counting_high  ; If pin == 1, keep counting
-    jmp got_fall                 ; If pin == 0, we're done measuring high
-keep_counting_high:
-    jmp x--, count_high          ; Decrement X each iteration
-
-got_fall:
-    mov x, ~x    ; x = ~x => 0xFFFFFFFF - original
-    mov isr, x
-    push noblock
-
-    ; Wait for pin to be LOW
-wait_for_fall:
-    jmp pin, wait_for_fall  ; If pin == 1, stay here (still high)
-    ; Once we fall through, pin==0 => measure LOW
-    set x, 0
-    mov x, ~x
-
-count_low:
-    jmp pin, got_rise2           ; If pin==1, done measuring low
-    jmp x--, count_low
-
-got_rise2:
-    mov x, ~x
-    mov isr, x
-    push noblock
-
-    jmp main
+initial_low:            ; Find falling edge at start of bit period
+    wait 0 pin, 0 [11]  ; Delay to eye of second half-period
+    jmp pin low_1
+low_0:
+    in y, 1             ; Line still low, no centre transition (data is `0`)
+    jmp initial_high
+low_1:                  ; Second transition detected (data is `1`)
+    in x, 1 [1]
 .wrap
-; ; Ждем начала сигнала
-; public start:
-;     wait 1 pin, 0 side 0   ; Ждем подъема сигнала
-;     mov x, isr             ; Сохраняем начальное значение счетчика в x
-;     push noblock           ; Отправляем начальное значение в FIFO
-
-;     wait 0 pin, 0 side 0   ; Ждем падения сигнала
-;     mov x, isr             ; Сохраняем конечное значение счетчика в x
-;     push noblock           ; Отправляем конечное значение в FIFO
-
-;     jmp start              ; Возвращаемся в начало
-
 
 % c-sdk {
-static inline void test_program_init(PIO pio, uint sm, uint offset, uint pin, float div) {
+static inline void differential_manchester_rx_program_init(PIO pio, uint sm, uint offset, uint pin, float div) {
     pio_sm_set_consecutive_pindirs(pio, sm, pin, 1, false);
     pio_gpio_init(pio, pin);
 
-    pio_sm_config c = test_program_get_default_config(offset);
+    pio_sm_config c = differential_manchester_rx_program_get_default_config(offset);
     sm_config_set_in_pins(&c, pin); // for WAIT
     sm_config_set_jmp_pin(&c, pin); // for JMP
-    ; sm_config_set_in_shift(&c, true, true, 32);
-    ; sm_config_set_in_shift(&c, false, true, 8);
+    sm_config_set_in_shift(&c, true, true, 32);
     sm_config_set_fifo_join(&c, PIO_FIFO_JOIN_RX);
-    ; sm_config_set_fifo_join(&c, PIO_FIFO_JOIN_NONE);
-    
     sm_config_set_clkdiv(&c, div);
     pio_sm_init(pio, sm, offset, &c);
 
-    ; // X and Y are set to 0 and 1, to conveniently emit these to ISR/FIFO.
-    ; pio_sm_exec(pio, sm, pio_encode_set(pio_x, 1));
-    ; pio_sm_exec(pio, sm, pio_encode_set(pio_y, 0));
+    // X and Y are set to 0 and 1, to conveniently emit these to ISR/FIFO.
+    pio_sm_exec(pio, sm, pio_encode_set(pio_x, 1));
+    pio_sm_exec(pio, sm, pio_encode_set(pio_y, 0));
     pio_sm_set_enabled(pio, sm, true);
 }
 %}
