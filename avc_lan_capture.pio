@@ -15,21 +15,105 @@
 ; Side-set bit 0 must be mapped to the data output pin.
 ; Autopull must be enabled.
 
-public start:
-initial_high:
-    out x, 1                     ; Start of bit period: always assert transition
-    jmp !x high_1     side 0b01 ; Test the data bit we just shifted out of OSR
-    jmp !x high_1     side 0b01 ; Test the data bit we just shifted out of OSR
-high_1:
-    nop
-    jmp initial_high  side 0b10 ; For 1 bits, also transition in the middle
+; public start:
+; initial_high:
+;     out x, 1                     ; Start of bit period: always assert transition
+;     jmp !x high_1     side 0b01 ; Test the data bit we just shifted out of OSR
+;     jmp !x high_1     side 0b01 ; Test the data bit we just shifted out of OSR
+; high_1:
+;     nop
+;     jmp initial_high  side 0b10 ; For 1 bits, also transition in the middle
 
-initial_low:
-    out x, 1                     ; Always shift 1 bit from OSR to X so we can
-    jmp !x low_1      side 0b01 ; branch on it. Autopull refills OSR for us.
-low_1:
-    nop
-    jmp initial_low   side 0b01 ; If there are two transitions, return to
+; initial_low:
+;     out x, 1                     ; Always shift 1 bit from OSR to X so we can
+;     jmp !x low_1      side 0b01 ; branch on it. Autopull refills OSR for us.
+; low_1:
+;     nop
+;     jmp initial_low   side 0b01 ; If there are two transitions, return to
+
+public start:
+
+main_loop:
+    ; Ждём, пока в FIFO придут данные (одно слово)
+    pull block
+    
+    ; Задаём, сколько раз хотим повторять "стартовый бит".
+    ; Допустим, N=5 (или 10, 20 — на ваше усмотрение)
+    set x, 7
+
+    ; Переходим вставлять "стартовый бит" (длинный импульс)
+    jmp start_bit_loop
+
+; ; --- Генерация стартового бита (долгого) ---
+; start_bit_proc:
+;     ; Допустим, хотим ~3 * (1+31) = 96 тактов удерживать side=0b01
+
+;     nop side 0b01 [1]
+;     nop side 0b01 [1]
+;     nop side 0b01 [1]
+
+;     ; По окончании переходим к обычной передаче
+;     jmp transmit_bits
+
+; start_bit_proc:
+;     ; Пример: держим side = 0b01 (низкий на одном пине, высокий на другом) 10 раз подряд.
+;     ; Или 0b11 — если надо оба пина в "1", и т.д.
+;     nop        side 0b10 [1]
+;     set x, 9                ; в X положим 9 (счётчик — почему 9, см. ниже)
+;     jmp transmit_bits
+
+
+
+start_bit_loop:
+    ; nop side 0b01 [1] => держим side=0b01 (к примеру) 1 такт задержки
+    nop side 0b01 [1]
+    
+    ; jmp x-- start_bit_loop => прыгаем, пока x не уменьшится до -1
+    jmp x-- start_bit_loop
+
+    nop side 0b10 [2]
+
+    ; ; Когда x стал -1, выходим из цикла — идём к основной передаче
+    ; jmp initial_high side 0b10
+
+; transmit_bits:
+; ; --- Дальше ваш код передачи ---
+; initial_high:
+;     out x, 1
+;     jmp !x high_1     side 0b01
+
+; high_1:
+;     nop
+;     jmp initial_high  side 0b10
+
+; initial_low:
+;     out x, 1                     ; Always shift 1 bit from OSR to X so we can
+;     jmp !x low_1      side 0b01 ; branch on it. Autopull refills OSR for us.
+; low_1:
+;     nop
+;     jmp initial_low   side 0b01 ; If there are two transitions, return to
+
+start_send_data:
+    nop        side 0b01
+    out x, 1
+    jmp !x do_zero side 0b01
+
+do_one:
+    ; x = 1  => прямой=1, инверт=0
+    ; side=0b01 (в двоичной "01") => pin0=1, pin1=0
+    nop        side 0b10
+    nop        side 0b10
+    jmp start_send_data  side 0b10
+
+do_zero:
+    ; x = 0  => прямой=0, инверт=1
+    ; side=0b10 (в двоичной "10") => pin0=0, pin1=1
+    nop        side 0b01
+    nop        side 0b01
+    jmp start_send_data  side 0b10
+
+public stop:
+    nop side 0b10 [2]
 
 % c-sdk {
 static inline void differential_manchester_tx_program_init(PIO pio, uint sm, uint offset, uint pin, float div) {
@@ -43,7 +127,7 @@ static inline void differential_manchester_tx_program_init(PIO pio, uint sm, uin
 
     pio_sm_config c = differential_manchester_tx_program_get_default_config(offset);
     sm_config_set_sideset_pins(&c, pin);
-    sm_config_set_out_shift(&c, true, true, 32);
+    sm_config_set_out_shift(&c, true, true, 8);
     sm_config_set_fifo_join(&c, PIO_FIFO_JOIN_TX);
     sm_config_set_clkdiv(&c, div);
     pio_sm_init(pio, sm, offset + differential_manchester_tx_offset_start, &c);

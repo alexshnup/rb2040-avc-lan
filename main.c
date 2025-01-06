@@ -34,8 +34,8 @@ int main() {
     // differential_manchester_tx_program_init(pio, sm_tx, offset_tx, pin_tx, 195.3125);
     // differential_manchester_rx_program_init(pio, sm_rx, offset_rx, pin_rx, 195.3125);
 
-    differential_manchester_tx_program_init(pio, sm_tx, offset_tx, pin_tx_high, 100);
-    differential_manchester_rx_program_init(pio, sm_rx, offset_rx, pin_rx, 100);
+    differential_manchester_tx_program_init(pio, sm_tx, offset_tx, pin_tx_high, 870);
+    differential_manchester_rx_program_init(pio, sm_rx, offset_rx, pin_rx, 350);
 
 //    test_program_init(pio, sm_rx, offset_rx, pin_rx, 1);
 
@@ -43,26 +43,40 @@ int main() {
     // differential_manchester_rx_program_init(pio, sm_rx, offset_rx, pin_rx, 16);
 
 
-    pio_sm_set_enabled(pio, sm_tx, false);
+    
+    // uint example_program_start_bit_offset;    // Смещение инструкции start_bit
+    // uint example_program_do_transmit_offset;  // Смещение инструкции do_transmit
 
+    // Получаем абсолютные смещения меток
+    uint start_bit_abs = offset_tx + differential_manchester_rx_offset_start;
+    uint stop_bit_abs = offset_tx + differential_manchester_tx_offset_stop;
 
     while (true) {
-
-        pio_sm_put_blocking(pio, sm_tx, 0);
-        pio_sm_set_enabled(pio, sm_tx, true);
-        // printf("%08x\n", pio_sm_get_blocking(pio, sm_rx));
-        sleep_ms(1000);
-
+        pio_sm_set_enabled(pio, sm_tx, false);
+        pio_sm_exec(pio, sm_tx, start_bit_abs);
         pio_sm_put_blocking(pio, sm_tx, 0x01);
+        pio_sm_put_blocking(pio, sm_tx, 0x04);
+        pio_sm_put_blocking(pio, sm_tx, 0x06);
+        pio_sm_exec(pio, sm_tx, stop_bit_abs);
         pio_sm_set_enabled(pio, sm_tx, true);
         // printf("%08x\n", pio_sm_get_blocking(pio, sm_rx));
         sleep_ms(1000);
-
+        
+        pio_sm_set_enabled(pio, sm_tx, false);
+        pio_sm_exec(pio, sm_tx, start_bit_abs);
         pio_sm_put_blocking(pio, sm_tx, 0x02);
+        pio_sm_exec(pio, sm_tx, stop_bit_abs);
         pio_sm_set_enabled(pio, sm_tx, true);
         // printf("%08x\n", pio_sm_get_blocking(pio, sm_rx));
         sleep_ms(1000);
 
+        pio_sm_set_enabled(pio, sm_tx, false);
+        pio_sm_exec(pio, sm_tx, start_bit_abs);
+        pio_sm_put_blocking(pio, sm_tx, 0);
+        pio_sm_exec(pio, sm_tx, stop_bit_abs);
+        pio_sm_set_enabled(pio, sm_tx, true);
+        // printf("%08x\n", pio_sm_get_blocking(pio, sm_rx));
+        sleep_ms(1000);
 
 
 
