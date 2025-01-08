@@ -1,119 +1,72 @@
 ;
-; Copyright (c) 2020 Raspberry Pi (Trading) Ltd.
+; Copyright (c) 2024 Aleksei Melnik alexshnup@gmail.com.
 ;
-; SPDX-License-Identifier: BSD-3-Clause
-;
+
 .pio_version 0 // only requires PIO version 0
 
 .program differential_manchester_tx
 .side_set 2 opt
 
-; Transmit one bit every 16 cycles. In each bit period:
-; - A '0' is encoded as a transition at the start of the bit period
-; - A '1' is encoded as a transition at the start *and* in the middle
-;
-; Side-set bit 0 must be mapped to the data output pin.
-; Autopull must be enabled.
-
-; public start:
-; initial_high:
-;     out x, 1                     ; Start of bit period: always assert transition
-;     jmp !x high_1     side 0b01 ; Test the data bit we just shifted out of OSR
-;     jmp !x high_1     side 0b01 ; Test the data bit we just shifted out of OSR
-; high_1:
-;     nop
-;     jmp initial_high  side 0b10 ; For 1 bits, also transition in the middle
-
-; initial_low:
-;     out x, 1                     ; Always shift 1 bit from OSR to X so we can
-;     jmp !x low_1      side 0b01 ; branch on it. Autopull refills OSR for us.
-; low_1:
-;     nop
-;     jmp initial_low   side 0b01 ; If there are two transitions, return to
-
 public start:
 
 main_loop:
+    ; nop side 0b10 [1]
     ; Ждём, пока в FIFO придут данные (одно слово)
     pull block
     
     ; Задаём, сколько раз хотим повторять "стартовый бит".
     ; Допустим, N=5 (или 10, 20 — на ваше усмотрение)
-    set x, 7
+    set x, 12
+    ; set x, 30
 
     ; Переходим вставлять "стартовый бит" (длинный импульс)
     jmp start_bit_loop
 
-; ; --- Генерация стартового бита (долгого) ---
-; start_bit_proc:
-;     ; Допустим, хотим ~3 * (1+31) = 96 тактов удерживать side=0b01
-
-;     nop side 0b01 [1]
-;     nop side 0b01 [1]
-;     nop side 0b01 [1]
-
-;     ; По окончании переходим к обычной передаче
-;     jmp transmit_bits
-
-; start_bit_proc:
-;     ; Пример: держим side = 0b01 (низкий на одном пине, высокий на другом) 10 раз подряд.
-;     ; Или 0b11 — если надо оба пина в "1", и т.д.
-;     nop        side 0b10 [1]
-;     set x, 9                ; в X положим 9 (счётчик — почему 9, см. ниже)
-;     jmp transmit_bits
-
-
 
 start_bit_loop:
     ; nop side 0b01 [1] => держим side=0b01 (к примеру) 1 такт задержки
-    nop side 0b01 [1]
+    nop side 0b01
+    nop side 0b01
+    nop side 0b01
     
     ; jmp x-- start_bit_loop => прыгаем, пока x не уменьшится до -1
     jmp x-- start_bit_loop
 
-    nop side 0b10 [2]
-
-    ; ; Когда x стал -1, выходим из цикла — идём к основной передаче
-    ; jmp initial_high side 0b10
-
-; transmit_bits:
-; ; --- Дальше ваш код передачи ---
-; initial_high:
-;     out x, 1
-;     jmp !x high_1     side 0b01
-
-; high_1:
-;     nop
-;     jmp initial_high  side 0b10
-
-; initial_low:
-;     out x, 1                     ; Always shift 1 bit from OSR to X so we can
-;     jmp !x low_1      side 0b01 ; branch on it. Autopull refills OSR for us.
-; low_1:
-;     nop
-;     jmp initial_low   side 0b01 ; If there are two transitions, return to
+    nop side 0b10  ; Start bit Tail
+    nop side 0b10  ; Start bit Tail
+    nop side 0b10  ; Start bit Tail
+    nop side 0b10  ; Start bit Tail
+    nop side 0b10  ; Start bit Tail
 
 start_send_data:
-    nop        side 0b01
     out x, 1
-    jmp !x do_zero side 0b01
+    nop        side 0b01 ; T_sync
+    nop        side 0b01 ; T_sync
+    nop        side 0b01 ; T_sync
+    nop        side 0b01 ; T_sync
+    nop        side 0b01 ; T_sync
+    nop        side 0b01 ; T_sync
+    jmp !x do_zero
 
 do_one:
     ; x = 1  => прямой=1, инверт=0
     ; side=0b01 (в двоичной "01") => pin0=1, pin1=0
-    nop        side 0b10
-    nop        side 0b10
-    jmp start_send_data  side 0b10
+    nop        side 0b10 ; T_data
+    nop        side 0b10 ; T_data
+    nop        side 0b10 ; T_data
+    nop        side 0b10 ; T_data
+    jmp start_send_data  side 0b10 ; Переходим, одновременно указываем Preparation time
 
 do_zero:
     ; x = 0  => прямой=0, инверт=1
     ; side=0b10 (в двоичной "10") => pin0=0, pin1=1
-    nop        side 0b01
-    nop        side 0b01
-    jmp start_send_data  side 0b10
+    nop        side 0b01 ; T_data
+    nop        side 0b01 ; T_data
+    nop        side 0b01 ; T_data
+    jmp start_send_data  side 0b10 ; Переходим, одновременно указываем Preparation time
 
 public stop:
-    nop side 0b10 [2]
+
 
 % c-sdk {
 static inline void differential_manchester_tx_program_init(PIO pio, uint sm, uint offset, uint pin, float div) {
@@ -121,70 +74,235 @@ static inline void differential_manchester_tx_program_init(PIO pio, uint sm, uin
     pio_gpio_init(pio, pin + 1);
     pio_sm_set_consecutive_pindirs(pio, sm, pin, 2, true);
     // pio_sm_set_pins_with_mask(pio, sm, 0, 1u << pin);
+
     // Можно сразу сбросить в 0, если хотим, чтобы при старте они были низкими
-    pio_sm_set_pins_with_mask(pio, sm, 0,
-                              (1u << pin) | (1u << (pin + 1)));
+    // pio_sm_set_pins_with_mask(pio, sm, 0,
+    //                           (1u << pin) | (1u << (pin + 1)));
+
+    // выставим «дифференциальные» уровни уже на старте, ещё до того, как PIO-программа начнёт ими управлять.
+    uint32_t pin_values = (1u << (pin + 1));
+    uint32_t pin_mask   = (1u << pin) | (1u << (pin + 1));
+    pio_sm_set_pins_with_mask(pio, sm, pin_values, pin_mask);
 
     pio_sm_config c = differential_manchester_tx_program_get_default_config(offset);
     sm_config_set_sideset_pins(&c, pin);
     sm_config_set_out_shift(&c, true, true, 8);
-    sm_config_set_fifo_join(&c, PIO_FIFO_JOIN_TX);
+    //sm_config_set_fifo_join(&c, PIO_FIFO_JOIN_TX);
     sm_config_set_clkdiv(&c, div);
     pio_sm_init(pio, sm, offset + differential_manchester_tx_offset_start, &c);
 
     // Execute a blocking pull so that we maintain the initial line state until data is available
     pio_sm_exec(pio, sm, pio_encode_pull(false, true));
-    pio_sm_set_enabled(pio, sm, true);
+    pio_sm_set_enabled(pio, sm, false);
 }
 %}
-.program differential_manchester_rx
 
-; Assumes line is idle low
-; One bit is 16 cycles. In each bit period:
-; - A '0' is encoded as a transition at time 0
-; - A '1' is encoded as a transition at time 0 and a transition at time T/2
-;
-; The IN mapping and the JMP pin select must both be mapped to the GPIO used for
-; RX data. Autopush must be enabled.
+.program differential_manchester_rx
+; .side_set 1 opt
 
 public start:
-initial_high:           ; Find rising edge at start of bit period
-    wait 1 pin, 0  [11] ; Delay to eye of second half-period (i.e 3/4 of way
-    jmp pin high_0      ; through bit) and branch on RX pin high/low.
-high_1:
-    in x, 1             ; Second transition detected (a `1` data symbol)
-    jmp initial_high
-high_0:
-    in y, 1 [1]         ; Line still high, no centre transition (data is `0`)
-    ; Fall-through
-
+; We mark wrap boundaries so the code loops from .wrap back to .wrap_target
 .wrap_target
-initial_low:            ; Find falling edge at start of bit period
-    wait 0 pin, 0 [11]  ; Delay to eye of second half-period
-    jmp pin low_1
-low_0:
-    in y, 1             ; Line still low, no centre transition (data is `0`)
-    jmp initial_high
-low_1:                  ; Second transition detected (data is `1`)
-    in x, 1 [1]
+main:
+    ; Wait for pin to be HIGH
+wait_for_rise:
+    jmp pin, got_rise     ; If pin == 1, jump
+    jmp wait_for_rise     ; Otherwise keep waiting
+
+got_rise:
+    set x, 0
+    mov x, ~x    ; x = 0xFFFFFFFF
+
+count_high:
+    jmp pin, keep_counting_high  ; If pin == 1, keep counting
+    jmp got_fall                 ; If pin == 0, we're done measuring high
+keep_counting_high:
+    jmp x--, count_high          ; Decrement X each iteration
+
+got_fall:
+    mov x, ~x    ; x = ~x => 0xFFFFFFFF - original
+    mov isr, x
+    push noblock
+
+    ; Wait for pin to be LOW
+wait_for_fall:
+    jmp pin, wait_for_fall  ; If pin == 1, stay here (still high)
+    ; Once we fall through, pin==0 => measure LOW
+    set x, 0
+    mov x, ~x
+
+count_low:
+    jmp pin, got_rise2           ; If pin==1, done measuring low
+    jmp x--, count_low
+
+got_rise2:
+    mov x, ~x
+    mov isr, x
+    push noblock
+
+    jmp main
 .wrap
 
-% c-sdk {
-static inline void differential_manchester_rx_program_init(PIO pio, uint sm, uint offset, uint pin, float div) {
-    pio_sm_set_consecutive_pindirs(pio, sm, pin, 1, false);
-    pio_gpio_init(pio, pin);
+; Будем читать данные в ISR, затем выталкивать их в FIFO по 8 бит.
+; sm_config_set_in_shift(c, /* shift_right */ false, /* autopush */ true, /* push_threshold */ 8);
+; => так мы сможем накопить 8 бит и потом отправить их одним словом в FIFO.
+; public start:
+    ; pull block 
+    ; mov x, osr 
 
-    pio_sm_config c = differential_manchester_rx_program_get_default_config(offset);
-    sm_config_set_in_pins(&c, pin); // for WAIT
-    sm_config_set_jmp_pin(&c, pin); // for JMP
-    sm_config_set_in_shift(&c, true, true, 32);
-    sm_config_set_fifo_join(&c, PIO_FIFO_JOIN_RX);
-    sm_config_set_clkdiv(&c, div);
-    pio_sm_init(pio, sm, offset, &c);
+; ; ; ; .wrap_target
+; .wrap_target
+; pull_value:
+;     pull block side 0     ; получаем 32-бит значение в OSR
+;     mov x, osr   side 0      ; x = 200 (например)
+;     jmp wait_for_start
+; ; ;     ; jmp wait_for_start
+; ;     ; nop side 1
+; ; ;     ; set x, 2  
+; ; ;     ; set x, 2  
+   
+    
+; ;     ; nop 
+; ; ; ;-------------------------------------------------------------------------
+; ; ; ; 1) Ожидаем стартовый бит (длинный HIGH ~150..170 мкс)
+; ; ; ;-------------------------------------------------------------------------
+; wait_for_start:
 
-    // X and Y are set to 0 and 1, to conveniently emit these to ISR/FIFO.
-    pio_sm_exec(pio, sm, pio_encode_set(pio_x, 1));
-    pio_sm_exec(pio, sm, pio_encode_set(pio_y, 0));
-    pio_sm_set_enabled(pio, sm, true);
-}
-%}
+;     wait 1 pin 0 side 0
+;     ; nop side 1
+; ;     nop
+; .wrap
+; ; ; ;     nop side 0
+; ; ; ;     ; Ждём, когда пин станет 1 (HIGH).
+; ;     wait 1 pin 0         ; дождались фронта
+
+; ;     nop side 1
+; ;     ; set x, 2  
+; ;     ; push block
+
+
+; ; ;     nop side 0;
+; ; ;     nop side 1;
+
+    
+; ; ;     ; Теперь замерим, как долго он будет в 1. Простой способ — крутиться в цикле, пока pin=1,
+; ; ;     ; вычитая из X. Если закончился X раньше, чем pin стал 0, считаем это "ошибкой" или "нет старта".
+    
+;     set x, 31               ; Задаём ~200 мкс запаса (больше 171).
+;     set y, 31               ; Задаём ~200 мкс запаса (больше 171).
+
+; count_high_start_1:
+;     jmp pin,  still_high_1  ; пока pin=1, прыгаем
+;     jmp check_start_length  ; pin=0 => вышли из HIGH
+; count_high_start_2:
+;     jmp pin,  still_high_2  ; пока pin=1, прыгаем
+;     jmp check_start_length  ; pin=0 => вышли из HIGH
+; ; ; ; §
+; still_high_1:
+;     jmp x-- count_high_start_1 ; уменьшаем x, если x->-1, значит HIGH слишком длинный => ошибка/перезапуск
+;     jmp still_high_2  ; или как-то обрабатывать
+; still_high_2:
+;     jmp y-- count_high_start_2 ; уменьшаем x, если x->-1, значит HIGH слишком длинный => ошибка/перезапуск
+;     jmp wait_for_start  ; или как-то обрабатывать
+
+
+; check_start_length:
+;     ; Здесь x показывает, сколько тактов осталось от 200, т.е. сколько мы НЕ «потратили».
+;     ; Значит длина HIGH = (200 - x) мкс. Надо проверить, что это в диапазоне ~150..171.
+;     ; Для упрощения: если (200 - x) < 150 => старт короткий => игнорируем, ждём заново
+;     ;                если (200 - x) > 180 => старт длинный => тоже ошибка.
+;     ; В PIO нет прямых сравнений, потому часто логику переносят в CPU.
+;     ; Мы просто сохраним x и пойдем дальше, а CPU потом может прочитать FIFO и решить.
+
+;     ; mov isr, x
+;     ; push block
+;     jmp x-- done
+;     ; CPU увидит (200 - x_in_fifo). Если OK, он продолжит, иначе перезагрузит SM.
+
+;     ; Для примера, просто переходим сразу на чтение бит, если CPU не остановил SM.
+;     ; jmp read_bits
+; done:
+;     nop
+;     nop side 0;
+;     nop side 1;
+; ;     jmp read_bits
+
+; ;-------------------------------------------------------------------------
+; ; 2) Читаем N (скажем, 8) бит
+; ;-------------------------------------------------------------------------
+; ; Предполагается, что линия уже LOW после стартового бита.
+; ; Каждый бит:
+; ;   - Ждём перехода LOW->HIGH (начало битового sync, 20 мкс)
+; ;   - Ждём ~20 мкс
+; ;   - Считываем пин (in pins, 1) => это бит
+; ;   - Ждём остаток до 40 мкс (ещё 20 мкс), переходим к следующему биту
+
+; read_bits:
+;     set y, 7  ; хотим прочитать 8 бит (0..7)
+; bit_loop:
+;     ; Ждём фронта (LOW->HIGH)
+;     wait 1 pin 0
+;     nop 
+;     nop [4]
+
+
+;     ; nop side 0;
+;     ; nop side 1;
+
+;     ; Подождём 20 мкс (T_sync)
+;     ; nop [19]    ; +1 такт на саму nop => итого ~20 мкс
+;     ; nop [7]
+;     ; nop [7]
+;     ; nop [5]
+
+;     ; Считываем пин (примерно в середине «окна данных»)
+;     in pins, 1   ; прочитали 1 бит в LSB с пина
+;     push block   
+
+;     nop;
+;     nop;
+
+;     nop [4]
+
+;     ; Дождёмся конца 40 мкс (ещё 20 мкс) — чтобы вернуться к LOW
+;     ; nop [19]    ; итого ещё ~20 мкс
+;     ; nop [7]
+;     ; nop [7]
+;     ; nop [5]
+
+;     jmp y-- bit_loop  ; читаем 8 бит
+
+;     ; Когда прочитали 8 бит, их автоматически PUSH'ит (если настроен autopush).
+;     ; Или можно принудительно сделать: push block
+;     push block
+
+;     ; Дальше либо ждём следующий байт, либо завершаем.
+;     jmp wait_for_start
+
+; .wrap
+
+; % c-sdk {
+; static inline void differential_manchester_rx_program_init(PIO pio, uint sm, uint offset, uint pin, float div) {
+;     pio_sm_config c = differential_manchester_rx_program_get_default_config(offset);
+;     pio_gpio_init(pio, pin);
+;     //pio_gpio_init(pio, pin+1);
+;     pio_sm_set_consecutive_pindirs(pio, sm, pin, 1, false);
+;     //pio_sm_set_consecutive_pindirs(pio, sm, pin + 1, 1, true);
+;     //sm_config_set_sideset_pins(&c, pin + 1);
+;     //pio_sm_set_pins_with_mask(pio, sm, 1, 1u << pin+1);
+
+;     // pio_sm_put_blocking(pio, sm, 100);  // Передаём время стартового бита в попугаях в TX FIFO
+
+
+;     sm_config_set_in_pins(&c, pin); // for WAIT
+;     sm_config_set_jmp_pin(&c, pin); // for JMP
+;     sm_config_set_fifo_join(&c, PIO_FIFO_JOIN_NONE);
+;     //sm_config_set_in_shift(&c, false, true, 8);
+
+;     sm_config_set_clkdiv(&c, div);
+;     pio_sm_init(pio, sm, offset, &c);
+
+
+;     pio_sm_set_enabled(pio, sm, true);
+; }
+; %}
