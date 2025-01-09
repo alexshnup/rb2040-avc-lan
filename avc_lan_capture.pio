@@ -4,7 +4,7 @@
 
 .pio_version 0 // only requires PIO version 0
 
-.program differential_manchester_tx
+.program avc_lan_tx
 .side_set 2 opt
 
 public start:
@@ -69,7 +69,7 @@ public stop:
 
 
 % c-sdk {
-static inline void differential_manchester_tx_program_init(PIO pio, uint sm, uint offset, uint pin, float div) {
+static inline void avc_lan_tx_program_init(PIO pio, uint sm, uint offset, uint pin, float div) {
     pio_gpio_init(pio, pin);
     pio_gpio_init(pio, pin + 1);
     pio_sm_set_consecutive_pindirs(pio, sm, pin, 2, true);
@@ -84,12 +84,12 @@ static inline void differential_manchester_tx_program_init(PIO pio, uint sm, uin
     uint32_t pin_mask   = (1u << pin) | (1u << (pin + 1));
     pio_sm_set_pins_with_mask(pio, sm, pin_values, pin_mask);
 
-    pio_sm_config c = differential_manchester_tx_program_get_default_config(offset);
+    pio_sm_config c = avc_lan_tx_program_get_default_config(offset);
     sm_config_set_sideset_pins(&c, pin);
     sm_config_set_out_shift(&c, true, true, 8);
     //sm_config_set_fifo_join(&c, PIO_FIFO_JOIN_TX);
     sm_config_set_clkdiv(&c, div);
-    pio_sm_init(pio, sm, offset + differential_manchester_tx_offset_start, &c);
+    pio_sm_init(pio, sm, offset + avc_lan_tx_offset_start, &c);
 
     // Execute a blocking pull so that we maintain the initial line state until data is available
     pio_sm_exec(pio, sm, pio_encode_pull(false, true));
@@ -97,212 +97,115 @@ static inline void differential_manchester_tx_program_init(PIO pio, uint sm, uin
 }
 %}
 
-.program differential_manchester_rx
-; .side_set 1 opt
+.program avc_lan_rx
 
-public start:
-; We mark wrap boundaries so the code loops from .wrap back to .wrap_target
+; 
+; Параметры/константы
+;
+.define MAX_COUNT      30            
+.define THRESHOLD      16           ; Условный порог (в «итерациях цикла»)
+; Параметры (при желании можно оформить .define и т.п.)
+; Допустим, хотим пушить байты (8 бит).
+; .shift_right 0        ; сдвиг ISR вправо при команде IN
+; .autopush     true
+; .push_thresh  8       ; пушим в FIFO, когда ISR накопит 8 бит
+
+; Здесь предполагаем, что измеряем сигнал на pin 0
+; (выберите нужный вам номер входного пина и настройте его в C-коде).
+
 .wrap_target
-main:
-    ; Wait for pin to be HIGH
-wait_for_rise:
-    jmp pin, got_rise     ; If pin == 1, jump
-    jmp wait_for_rise     ; Otherwise keep waiting
+; ------------------------------------------------------------------------
+; Ждём, пока пин НЕ станет 0 (то есть ждём события перехода в 0)
+; ------------------------------------------------------------------------
+start:
+    wait 1 pin 0   ; дождаться, что pin в 1
+wait_while_high:
+    ; wait 1 pin 0   ; дождаться, что pin в 1
+    wait 0 pin 0   ; дождаться, что pin упадёт в 0
+                   ; как только упадёт — переходим к measure_low
 
-got_rise:
-    set x, 0
-    mov x, ~x    ; x = 0xFFFFFFFF
+; ------------------------------------------------------------------------
+; Готовим X для «длинного» счётчика
+; ------------------------------------------------------------------------
+    set x, 31
+    ; mov x, ~x       ; X ~ 0xFFFFFFE0 (~0xFFFFFFFF, но чуть меньше)
 
-count_high:
-    jmp pin, keep_counting_high  ; If pin == 1, keep counting
-    jmp got_fall                 ; If pin == 0, we're done measuring high
-keep_counting_high:
-    jmp x--, count_high          ; Decrement X each iteration
+; ------------------------------------------------------------------------
+; measure_low — крутимся, пока вход 0, уменьшая X
+; если вход поднялся в 1 — переходим к measure_done
+; если X «кончился» (стал 0), значит таймаут => идём в measure_timeout
+; ------------------------------------------------------------------------
+measure_low:
+    jmp pin measure_done   ; если pin=1, значит «низкий импульс» кончился
+    jmp x-- measure_low    ; если pin=0 и x != 0 — продолжаем крутиться
+    ; если x достиг 0 => вываливаемся ниже (инструкция jmp x-- не выполнит переход)
+measure_timeout:
+    ; Обнаружен таймаут: импульс слишком длинный.
+    ; Здесь очищаем накопленные биты в ISR.
+    set y, 0         ; загружаем 0 в регистр Y
+    mov isr, y       ; перемещаем 0 в ISR, очищаем накопленные биты
+timeout_wait_for_high:
+    jmp pin timeout_done    ; если pin=1 — выходим из таймаута
+    jmp timeout_wait_for_high
+timeout_done:
+    ; Возвращаемся к ожиданию НОВОГО перехода в 0
+    jmp wait_while_high
 
-got_fall:
-    mov x, ~x    ; x = ~x => 0xFFFFFFFF - original
-    mov isr, x
-    push noblock
+; ------------------------------------------------------------------------
+; Если дошли сюда — значит мы увидели, что pin=1 => низкий импульс закончился.
+; В X осталось некое значение. Сравниваем с THRESHOLD через Y.
+; ------------------------------------------------------------------------
+measure_done:
+    set y, 16
+    ; mov y, ~y       ; THRESHOLD условный, ~10 = 0xFFFFFFF5
 
-    ; Wait for pin to be LOW
-wait_for_fall:
-    jmp pin, wait_for_fall  ; If pin == 1, stay here (still high)
-    ; Once we fall through, pin==0 => measure LOW
-    set x, 0
-    mov x, ~x
+compare_loop:
+    jmp x-- x_still_nonzero
+    ; => x=0 => значит X < THRESHOLD => пишем 0
+store_bit_0:
+    in null, 1
+    jmp bit_stored
 
-count_low:
-    jmp pin, got_rise2           ; If pin==1, done measuring low
-    jmp x--, count_low
+x_still_nonzero:
+    jmp y-- compare_loop
+    ; => если y==0 (раньше x), значит X >= THRESHOLD => пишем 1
+store_bit_1:
+    set x, 1
+    in x, 1
 
-got_rise2:
-    mov x, ~x
-    mov isr, x
-    push noblock
+bit_stored:
+    ; Переходим к ожиданию верхнего уровня, т.к. по условию
+    ; "между байтами нужно дождаться 1". Но сейчас он уже 1.
+    ; Мы можем сразу перейти к wait_while_high, чтобы ждать
+    ; когда следующая «новая» низкая фаза начнётся.
+    ; НО! pin уже 1, значит нам надо дождаться, 
+    ; когда он снова станет 0 => не проблема — так и сделаем.
+    jmp wait_while_high
 
-    jmp main
 .wrap
 
-; Будем читать данные в ISR, затем выталкивать их в FIFO по 8 бит.
-; sm_config_set_in_shift(c, /* shift_right */ false, /* autopush */ true, /* push_threshold */ 8);
-; => так мы сможем накопить 8 бит и потом отправить их одним словом в FIFO.
-; public start:
-    ; pull block 
-    ; mov x, osr 
+; Конец программы
 
-; ; ; ; .wrap_target
-; .wrap_target
-; pull_value:
-;     pull block side 0     ; получаем 32-бит значение в OSR
-;     mov x, osr   side 0      ; x = 200 (например)
-;     jmp wait_for_start
-; ; ;     ; jmp wait_for_start
-; ;     ; nop side 1
-; ; ;     ; set x, 2  
-; ; ;     ; set x, 2  
-   
+
+% c-sdk {
+static inline void test_program_init(PIO pio, uint sm, uint offset, uint pin, float div) {
+    pio_sm_set_consecutive_pindirs(pio, sm, pin, 1, false);
+    pio_gpio_init(pio, pin);
+
+    pio_sm_config c = test_program_get_default_config(offset);
+    sm_config_set_in_pins(&c, pin); // for WAIT
+    sm_config_set_jmp_pin(&c, pin); // for JMP
+    ;// sm_config_set_in_shift(&c, true, true, 32);
+    sm_config_set_in_shift(&c, false, true, 8);
+    ;// sm_config_set_fifo_join(&c, PIO_FIFO_JOIN_RX);
+    sm_config_set_fifo_join(&c, PIO_FIFO_JOIN_NONE);
     
-; ;     ; nop 
-; ; ; ;-------------------------------------------------------------------------
-; ; ; ; 1) Ожидаем стартовый бит (длинный HIGH ~150..170 мкс)
-; ; ; ;-------------------------------------------------------------------------
-; wait_for_start:
+    sm_config_set_clkdiv(&c, div);
+    pio_sm_init(pio, sm, offset, &c);
 
-;     wait 1 pin 0 side 0
-;     ; nop side 1
-; ;     nop
-; .wrap
-; ; ; ;     nop side 0
-; ; ; ;     ; Ждём, когда пин станет 1 (HIGH).
-; ;     wait 1 pin 0         ; дождались фронта
-
-; ;     nop side 1
-; ;     ; set x, 2  
-; ;     ; push block
-
-
-; ; ;     nop side 0;
-; ; ;     nop side 1;
-
-    
-; ; ;     ; Теперь замерим, как долго он будет в 1. Простой способ — крутиться в цикле, пока pin=1,
-; ; ;     ; вычитая из X. Если закончился X раньше, чем pin стал 0, считаем это "ошибкой" или "нет старта".
-    
-;     set x, 31               ; Задаём ~200 мкс запаса (больше 171).
-;     set y, 31               ; Задаём ~200 мкс запаса (больше 171).
-
-; count_high_start_1:
-;     jmp pin,  still_high_1  ; пока pin=1, прыгаем
-;     jmp check_start_length  ; pin=0 => вышли из HIGH
-; count_high_start_2:
-;     jmp pin,  still_high_2  ; пока pin=1, прыгаем
-;     jmp check_start_length  ; pin=0 => вышли из HIGH
-; ; ; ; §
-; still_high_1:
-;     jmp x-- count_high_start_1 ; уменьшаем x, если x->-1, значит HIGH слишком длинный => ошибка/перезапуск
-;     jmp still_high_2  ; или как-то обрабатывать
-; still_high_2:
-;     jmp y-- count_high_start_2 ; уменьшаем x, если x->-1, значит HIGH слишком длинный => ошибка/перезапуск
-;     jmp wait_for_start  ; или как-то обрабатывать
-
-
-; check_start_length:
-;     ; Здесь x показывает, сколько тактов осталось от 200, т.е. сколько мы НЕ «потратили».
-;     ; Значит длина HIGH = (200 - x) мкс. Надо проверить, что это в диапазоне ~150..171.
-;     ; Для упрощения: если (200 - x) < 150 => старт короткий => игнорируем, ждём заново
-;     ;                если (200 - x) > 180 => старт длинный => тоже ошибка.
-;     ; В PIO нет прямых сравнений, потому часто логику переносят в CPU.
-;     ; Мы просто сохраним x и пойдем дальше, а CPU потом может прочитать FIFO и решить.
-
-;     ; mov isr, x
-;     ; push block
-;     jmp x-- done
-;     ; CPU увидит (200 - x_in_fifo). Если OK, он продолжит, иначе перезагрузит SM.
-
-;     ; Для примера, просто переходим сразу на чтение бит, если CPU не остановил SM.
-;     ; jmp read_bits
-; done:
-;     nop
-;     nop side 0;
-;     nop side 1;
-; ;     jmp read_bits
-
-; ;-------------------------------------------------------------------------
-; ; 2) Читаем N (скажем, 8) бит
-; ;-------------------------------------------------------------------------
-; ; Предполагается, что линия уже LOW после стартового бита.
-; ; Каждый бит:
-; ;   - Ждём перехода LOW->HIGH (начало битового sync, 20 мкс)
-; ;   - Ждём ~20 мкс
-; ;   - Считываем пин (in pins, 1) => это бит
-; ;   - Ждём остаток до 40 мкс (ещё 20 мкс), переходим к следующему биту
-
-; read_bits:
-;     set y, 7  ; хотим прочитать 8 бит (0..7)
-; bit_loop:
-;     ; Ждём фронта (LOW->HIGH)
-;     wait 1 pin 0
-;     nop 
-;     nop [4]
-
-
-;     ; nop side 0;
-;     ; nop side 1;
-
-;     ; Подождём 20 мкс (T_sync)
-;     ; nop [19]    ; +1 такт на саму nop => итого ~20 мкс
-;     ; nop [7]
-;     ; nop [7]
-;     ; nop [5]
-
-;     ; Считываем пин (примерно в середине «окна данных»)
-;     in pins, 1   ; прочитали 1 бит в LSB с пина
-;     push block   
-
-;     nop;
-;     nop;
-
-;     nop [4]
-
-;     ; Дождёмся конца 40 мкс (ещё 20 мкс) — чтобы вернуться к LOW
-;     ; nop [19]    ; итого ещё ~20 мкс
-;     ; nop [7]
-;     ; nop [7]
-;     ; nop [5]
-
-;     jmp y-- bit_loop  ; читаем 8 бит
-
-;     ; Когда прочитали 8 бит, их автоматически PUSH'ит (если настроен autopush).
-;     ; Или можно принудительно сделать: push block
-;     push block
-
-;     ; Дальше либо ждём следующий байт, либо завершаем.
-;     jmp wait_for_start
-
-; .wrap
-
-; % c-sdk {
-; static inline void differential_manchester_rx_program_init(PIO pio, uint sm, uint offset, uint pin, float div) {
-;     pio_sm_config c = differential_manchester_rx_program_get_default_config(offset);
-;     pio_gpio_init(pio, pin);
-;     //pio_gpio_init(pio, pin+1);
-;     pio_sm_set_consecutive_pindirs(pio, sm, pin, 1, false);
-;     //pio_sm_set_consecutive_pindirs(pio, sm, pin + 1, 1, true);
-;     //sm_config_set_sideset_pins(&c, pin + 1);
-;     //pio_sm_set_pins_with_mask(pio, sm, 1, 1u << pin+1);
-
-;     // pio_sm_put_blocking(pio, sm, 100);  // Передаём время стартового бита в попугаях в TX FIFO
-
-
-;     sm_config_set_in_pins(&c, pin); // for WAIT
-;     sm_config_set_jmp_pin(&c, pin); // for JMP
-;     sm_config_set_fifo_join(&c, PIO_FIFO_JOIN_NONE);
-;     //sm_config_set_in_shift(&c, false, true, 8);
-
-;     sm_config_set_clkdiv(&c, div);
-;     pio_sm_init(pio, sm, offset, &c);
-
-
-;     pio_sm_set_enabled(pio, sm, true);
-; }
-; %}
+    ;// X and Y are set to 0 and 1, to conveniently emit these to ISR/FIFO.
+    ;// pio_sm_exec(pio, sm, pio_encode_set(pio_x, 1));
+    ;// pio_sm_exec(pio, sm, pio_encode_set(pio_y, 0));
+    pio_sm_set_enabled(pio, sm, true);
+}
+%}

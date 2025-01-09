@@ -5,7 +5,7 @@
 ;
 .pio_version 0 // only requires PIO version 0
 
-.program differential_manchester_tx
+.program avc_lan_tx
 .side_set 1 opt
 
 ; Transmit one bit every 16 cycles. In each bit period:
@@ -35,17 +35,17 @@ low_0:
     jmp initial_high         [7] ; the initial line state is flipped!
 
 % c-sdk {
-static inline void differential_manchester_tx_program_init(PIO pio, uint sm, uint offset, uint pin, float div) {
+static inline void avc_lan_tx_program_init(PIO pio, uint sm, uint offset, uint pin, float div) {
     pio_sm_set_pins_with_mask(pio, sm, 0, 1u << pin);
     pio_sm_set_consecutive_pindirs(pio, sm, pin, 1, true);
     pio_gpio_init(pio, pin);
 
-    pio_sm_config c = differential_manchester_tx_program_get_default_config(offset);
+    pio_sm_config c = avc_lan_tx_program_get_default_config(offset);
     sm_config_set_sideset_pins(&c, pin);
     sm_config_set_out_shift(&c, true, true, 32);
     sm_config_set_fifo_join(&c, PIO_FIFO_JOIN_TX);
     sm_config_set_clkdiv(&c, div);
-    pio_sm_init(pio, sm, offset + differential_manchester_tx_offset_start, &c);
+    pio_sm_init(pio, sm, offset + avc_lan_tx_offset_start, &c);
 
     // Execute a blocking pull so that we maintain the initial line state until data is available
     pio_sm_exec(pio, sm, pio_encode_pull(false, true));
