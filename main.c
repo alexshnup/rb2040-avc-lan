@@ -6,7 +6,7 @@
 
 const uint pin_tx_high = 2;
 const uint pin_tx_low = 3;  // второй инвертированный пин нельзя перенанзначить он всегда +1 (следующий)
-const uint pin = 4;
+const uint pin_rx = 4;
 
 void print_bits(uint32_t value) {
     // Проходимся по битам от старшего (31) к младшему (0)
@@ -29,10 +29,6 @@ void print_byte_bits(uint8_t byte) {
 int main() {
     stdio_init_all();
 
-    gpio_init(pin);
-    gpio_set_dir(pin, GPIO_IN);
-    gpio_pull_up(pin);  // or pull_down if your wiring calls for it
-
     PIO pio = pio0;
     // uint sm_tx = 0;
     int sm_tx = pio_claim_unused_sm(pio, true);
@@ -45,20 +41,6 @@ int main() {
 
     printf("Transmit program loaded at %d\n", offset_tx);
     printf("Receive program loaded at %d\n", offset_rx);
-
-    pio_sm_config c = avc_lan_rx_program_get_default_config(offset_rx);
-    sm_config_set_in_pins(&c, pin);
-    sm_config_set_jmp_pin(&c, pin);
-
-    // Use separate FIFOs (no PIO_FIFO_JOIN). 
-    sm_config_set_fifo_join(&c, PIO_FIFO_JOIN_NONE);
-
-    // Decide your clock divider
-    sm_config_set_clkdiv(&c, 1.0f);
-
-    // Initialize SM
-    pio_sm_init(pio, sm_rx, offset_rx, &c);
-    pio_sm_set_enabled(pio, sm_rx, true);
 
     // // Configure state machines, set bit rate at 5 Mbps
     // avc_lan_tx_program_init(pio, sm_tx, offset_tx, pin_tx, 125.f / (16 * 5));
@@ -75,7 +57,7 @@ int main() {
     avc_lan_tx_program_init(pio, sm_tx, offset_tx, pin_tx_high, 400);
     // avc_lan_rx_program_init(pio, sm_rx, offset_rx, pin_rx, 125.f);
 
-//    test_program_init(pio, sm_rx, offset_rx, pin_rx, 1);
+   test_program_init(pio, sm_rx, offset_rx, pin_rx, 60);
 
 
     // avc_lan_rx_program_init(pio, sm_rx, offset_rx, pin_rx, 16);
