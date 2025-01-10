@@ -26,6 +26,6 @@ done
 # cp avc_lan_capture.uf2 /Volumes/RPI-RP2/
 sleep 1
 killall NotificationCenter
-sleep 2
-screen /dev/tty.usbmodem11401 115200
-reset
+# sleep 2
+# screen /dev/tty.usbmodem11401 115200
+# reset

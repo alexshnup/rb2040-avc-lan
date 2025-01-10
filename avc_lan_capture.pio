@@ -98,7 +98,6 @@ static inline void avc_lan_tx_program_init(PIO pio, uint sm, uint offset, uint p
 %}
 
 .program avc_lan_rx
-
 ; 
 ; Параметры/константы
 ;
@@ -141,6 +140,7 @@ measure_low:
     ; если x достиг 0 => вываливаемся ниже (инструкция jmp x-- не выполнит переход)
 measure_timeout:
     ; Обнаружен таймаут: импульс слишком длинный.
+    push noblock         ; Отправить текущее содержимое ISR в FIFO без блокировки.
     ; Здесь очищаем накопленные биты в ISR.
     set y, 0         ; загружаем 0 в регистр Y
     mov isr, y       ; перемещаем 0 в ISR, очищаем накопленные биты
@@ -188,11 +188,11 @@ bit_stored:
 
 
 % c-sdk {
-static inline void test_program_init(PIO pio, uint sm, uint offset, uint pin, float div) {
+static inline void avc_lan_rx_program_init(PIO pio, uint sm, uint offset, uint pin, float div) {
     pio_sm_set_consecutive_pindirs(pio, sm, pin, 1, false);
     pio_gpio_init(pio, pin);
 
-    pio_sm_config c = test_program_get_default_config(offset);
+    pio_sm_config c = avc_lan_rx_program_get_default_config(offset);
     sm_config_set_in_pins(&c, pin); // for WAIT
     sm_config_set_jmp_pin(&c, pin); // for JMP
     ;// sm_config_set_in_shift(&c, true, true, 32);
