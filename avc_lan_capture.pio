@@ -11,25 +11,25 @@ public start:
 
 main_loop:
     ; nop side 0b10 [1]
-    ; Ждём, пока в FIFO придут данные (одно слово)
+    ; Wait until data (one word) arrives in FIFO
     pull block
     
-    ; Задаём, сколько раз хотим повторять "стартовый бит".
-    ; Допустим, N=5 (или 10, 20 — на ваше усмотрение)
+    ; Set how many times we want to repeat the "start bit".
+    ; For example, N=5 (or 10, 20 — at your discretion)
     set x, 12
     ; set x, 30
 
-    ; Переходим вставлять "стартовый бит" (длинный импульс)
+    ; Proceed to insert the "start bit" (long pulse)
     jmp start_bit_loop
 
 
 start_bit_loop:
-    ; nop side 0b01 [1] => держим side=0b01 (к примеру) 1 такт задержки
+    ; nop side 0b01 [1] => maintain side=0b01 (for example) for 1 cycle delay
     nop side 0b01
     nop side 0b01
     nop side 0b01
     
-    ; jmp x-- start_bit_loop => прыгаем, пока x не уменьшится до -1
+    ; jmp x-- start_bit_loop => jump back while x is not decremented to -1
     jmp x-- start_bit_loop
 
     nop side 0b10  ; Start bit Tail
@@ -49,21 +49,21 @@ start_send_data:
     jmp !x do_zero
 
 do_one:
-    ; x = 1  => прямой=1, инверт=0
-    ; side=0b01 (в двоичной "01") => pin0=1, pin1=0
+    ; x = 1  => direct=1, inverted=0
+    ; side=0b01 (binary "01") => pin0=1, pin1=0
     nop        side 0b10 ; T_data
     nop        side 0b10 ; T_data
     nop        side 0b10 ; T_data
     nop        side 0b10 ; T_data
-    jmp start_send_data  side 0b10 ; Переходим, одновременно указываем Preparation time
+    jmp start_send_data  side 0b10 ; Jump, simultaneously indicating Preparation time
 
 do_zero:
-    ; x = 0  => прямой=0, инверт=1
-    ; side=0b10 (в двоичной "10") => pin0=0, pin1=1
+    ; x = 0  => direct=0, inverted=1
+    ; side=0b10 (binary "10") => pin0=0, pin1=1
     nop        side 0b01 ; T_data
     nop        side 0b01 ; T_data
     nop        side 0b01 ; T_data
-    jmp start_send_data  side 0b10 ; Переходим, одновременно указываем Preparation time
+    jmp start_send_data  side 0b10 ; Jump, simultaneously indicating Preparation time
 
 public stop:
 
@@ -75,11 +75,11 @@ static inline void avc_lan_tx_program_init(PIO pio, uint sm, uint offset, uint p
     pio_sm_set_consecutive_pindirs(pio, sm, pin, 2, true);
     // pio_sm_set_pins_with_mask(pio, sm, 0, 1u << pin);
 
-    // Можно сразу сбросить в 0, если хотим, чтобы при старте они были низкими
+    // You can reset them to 0 immediately if you want them low at start
     // pio_sm_set_pins_with_mask(pio, sm, 0,
     //                           (1u << pin) | (1u << (pin + 1)));
 
-    // выставим «дифференциальные» уровни уже на старте, ещё до того, как PIO-программа начнёт ими управлять.
+    // Set "differential" levels already at the start, even before the PIO program takes control.
     uint32_t pin_values = (1u << (pin + 1));
     uint32_t pin_mask   = (1u << pin) | (1u << (pin + 1));
     pio_sm_set_pins_with_mask(pio, sm, pin_values, pin_mask);
@@ -99,92 +99,92 @@ static inline void avc_lan_tx_program_init(PIO pio, uint sm, uint offset, uint p
 
 .program avc_lan_rx
 ; 
-; Параметры/константы
+; Parameters/constants
 ;
 .define MAX_COUNT      30            
-.define THRESHOLD      16           ; Условный порог (в «итерациях цикла»)
-; Параметры (при желании можно оформить .define и т.п.)
-; Допустим, хотим пушить байты (8 бит).
-; .shift_right 0        ; сдвиг ISR вправо при команде IN
+.define THRESHOLD      16           ; Conditional threshold (in "loop iterations")
+; Parameters (if desired, you can use .define etc.)
+; For example, we want to push bytes (8 bits).
+; .shift_right 0        ; shift ISR right on IN command
 ; .autopush     true
-; .push_thresh  8       ; пушим в FIFO, когда ISR накопит 8 бит
+; .push_thresh  8       ; push to FIFO when ISR accumulates 8 bits
 
-; Здесь предполагаем, что измеряем сигнал на pin 0
-; (выберите нужный вам номер входного пина и настройте его в C-коде).
+; Here we assume we're measuring the signal on pin 0
+; (choose the desired input pin number and configure it in the C code).
 
 .wrap_target
 ; ------------------------------------------------------------------------
-; Ждём, пока пин НЕ станет 0 (то есть ждём события перехода в 0)
+; Wait until the pin BECOMES 0 (i.e., wait for a transition to 0)
 ; ------------------------------------------------------------------------
 start:
-    wait 1 pin 0   ; дождаться, что pin в 1
+    wait 1 pin 0   ; wait until pin is 1
 wait_while_high:
-    ; wait 1 pin 0   ; дождаться, что pin в 1
-    wait 0 pin 0   ; дождаться, что pin упадёт в 0
-                   ; как только упадёт — переходим к measure_low
+    ; wait 1 pin 0   ; wait until pin is 1
+    wait 0 pin 0   ; wait until pin falls to 0
+                   ; as soon as it falls — proceed to measure_low
 
 ; ------------------------------------------------------------------------
-; Готовим X для «длинного» счётчика
+; Prepare X for a "long" counter
 ; ------------------------------------------------------------------------
     set x, 31
-    ; mov x, ~x       ; X ~ 0xFFFFFFE0 (~0xFFFFFFFF, но чуть меньше)
+    ; mov x, ~x       ; X ~ 0xFFFFFFE0 (~0xFFFFFFFF, but slightly less)
 
 ; ------------------------------------------------------------------------
-; measure_low — крутимся, пока вход 0, уменьшая X
-; если вход поднялся в 1 — переходим к measure_done
-; если X «кончился» (стал 0), значит таймаут => идём в measure_timeout
+; measure_low — loop while input is 0, decrementing X
+; If input rises to 1 — go to measure_done
+; If X "runs out" (becomes 0), then timeout => go to measure_timeout
 ; ------------------------------------------------------------------------
 measure_low:
-    jmp pin measure_done   ; если pin=1, значит «низкий импульс» кончился
-    jmp x-- measure_low    ; если pin=0 и x != 0 — продолжаем крутиться
-    ; если x достиг 0 => вываливаемся ниже (инструкция jmp x-- не выполнит переход)
+    jmp pin measure_done   ; if pin=1, then the "low pulse" ended
+    jmp x-- measure_low    ; if pin=0 and x != 0 — keep looping
+    ; if x reaches 0 => fall through (jmp x-- will not jump)
 measure_timeout:
-    ; Обнаружен таймаут: импульс слишком длинный.
-    push noblock         ; Отправить текущее содержимое ISR в FIFO без блокировки.
-    ; Здесь очищаем накопленные биты в ISR.
-    set y, 0         ; загружаем 0 в регистр Y
-    mov isr, y       ; перемещаем 0 в ISR, очищаем накопленные биты
+    ; Timeout detected: pulse too long.
+    push noblock         ; Send current ISR contents to FIFO without blocking.
+    ; Here we clear accumulated bits in ISR.
+    set y, 0         ; load 0 into register Y
+    mov isr, y       ; move 0 into ISR, clear accumulated bits
 timeout_wait_for_high:
-    jmp pin timeout_done    ; если pin=1 — выходим из таймаута
+    jmp pin timeout_done    ; if pin=1 — exit timeout
     jmp timeout_wait_for_high
 timeout_done:
-    ; Возвращаемся к ожиданию НОВОГО перехода в 0
+    ; Return to waiting for a NEW transition to 0
     jmp wait_while_high
 
 ; ------------------------------------------------------------------------
-; Если дошли сюда — значит мы увидели, что pin=1 => низкий импульс закончился.
-; В X осталось некое значение. Сравниваем с THRESHOLD через Y.
+; If we reached here — we saw that pin=1 => low pulse ended.
+; Some value remains in X. Compare with THRESHOLD using Y.
 ; ------------------------------------------------------------------------
 measure_done:
     set y, 16
-    ; mov y, ~y       ; THRESHOLD условный, ~10 = 0xFFFFFFF5
+    ; mov y, ~y       ; THRESHOLD conditional, ~10 = 0xFFFFFFF5
 
 compare_loop:
     jmp x-- x_still_nonzero
-    ; => x=0 => значит X < THRESHOLD => пишем 0
+    ; => x=0 => means X < THRESHOLD => write 0
 store_bit_0:
     in null, 1
     jmp bit_stored
 
 x_still_nonzero:
     jmp y-- compare_loop
-    ; => если y==0 (раньше x), значит X >= THRESHOLD => пишем 1
+    ; => if y==0 (before x), then X >= THRESHOLD => write 1
 store_bit_1:
     set x, 1
     in x, 1
 
 bit_stored:
-    ; Переходим к ожиданию верхнего уровня, т.к. по условию
-    ; "между байтами нужно дождаться 1". Но сейчас он уже 1.
-    ; Мы можем сразу перейти к wait_while_high, чтобы ждать
-    ; когда следующая «новая» низкая фаза начнётся.
-    ; НО! pin уже 1, значит нам надо дождаться, 
-    ; когда он снова станет 0 => не проблема — так и сделаем.
+    ; Proceed to waiting for high level, because by condition
+    ; "between bytes you need to wait for 1". But now it's already 1.
+    ; We can immediately jump to wait_while_high to wait
+    ; for the next "new" low phase to begin.
+    ; BUT! pin is already 1, so we need to wait until 
+    ; it becomes 0 again => no problem — we'll do that.
     jmp wait_while_high
 
 .wrap
 
-; Конец программы
+; End of program
 
 
 % c-sdk {

@@ -2,26 +2,26 @@
 #include "pico/stdlib.h"
 #include "hardware/pio.h"
 #include "hardware/clocks.h"
-#include "avc_lan_capture.pio.h" // Включаем сгенерированный заголовочный файл
+#include "avc_lan_capture.pio.h" // Include the generated header file
 
 const uint pin_tx_high = 2;
-const uint pin_tx_low = 3;  // второй инвертированный пин нельзя перенанзначить он всегда +1 (следующий)
+const uint pin_tx_low = 3;  // The second inverted pin cannot be reassigned; it is always +1 (the next one)
 const uint pin_rx = 4;
 
 uint32_t calculating_delay = 0;
 uint32_t byte_counting = 0;
 
-// используется для отправки последнего пакета. Так как у нас отправка по факту после прихода нового по умолчанию
+// Used for sending the last packet. Since our sending happens by default after a new one arrives
 uint64_t count_cycles_without_new_data = 0;
 #define LAST_DATA_THRESHOLD 50000 
 
-#define MAX_BUFFER_SIZE 1024  // макс. размер буфера в байтах
-#define DELTA_THRESHOLD 1000   // порог в микросекундах
+#define MAX_BUFFER_SIZE 1024  // max buffer size in bytes
+#define DELTA_THRESHOLD 1000   // threshold in microseconds
 
 void print_bits(uint32_t value) {
-    // Проходимся по битам от старшего (31) к младшему (0)
+    // Iterate over bits from the most significant (31) to the least significant (0)
     for (int i = 31; i >= 0; i--) {
-        // Сдвигаем value вправо на i и проверяем младший бит
+        // Shift value right by i and check the least significant bit
         printf("%d", (value >> i) & 1);
     }
     printf("\n");
@@ -29,7 +29,7 @@ void print_bits(uint32_t value) {
 
 void print_byte_bits(uint8_t byte) {
     for (int i = 7; i >= 0; --i) {
-        // Сдвигаем byte вправо на i позиций и берём младший бит:
+        // Shift byte right by i positions and take the least significant bit:
         int bit = (byte >> i) & 1;
         printf("%d", bit);
     }
@@ -37,17 +37,17 @@ void print_byte_bits(uint8_t byte) {
 }
 
 char* byte_to_bit_string(uint8_t byte) {
-    // Выделение памяти для 9 символов: 8 бит + завершающий нулевой символ
+    // Allocate memory for 9 characters: 8 bits + null terminator
     char *bit_string = malloc(9);
     if (!bit_string) {
-        return NULL; // обработка ошибки выделения памяти
+        return NULL; // handle memory allocation error
     }
 
     for (int i = 7; i >= 0; --i) {
-        // Получаем очередной бит и сохраняем как символ
+        // Get the current bit and store it as a character
         bit_string[7 - i] = ((byte >> i) & 1) ? '1' : '0';
     }
-    bit_string[8] = '\0'; // Завершающий нулевой символ
+    bit_string[8] = '\0'; // Null terminator
 
     return bit_string;
 }
@@ -55,31 +55,29 @@ char* byte_to_bit_string(uint8_t byte) {
 uint8_t reverse_bits(uint8_t byte) {
     uint8_t reversed = 0;
     for (int i = 0; i < 8; ++i) {
-        // Извлекаем i-й бит из исходного байта:
+        // Extract the i-th bit from the original byte:
         uint8_t bit = (byte >> i) & 1;
-        // Устанавливаем соответствующий бит в перевёрнутом байте:
+        // Set the corresponding bit in the reversed byte:
         reversed |= bit << (7 - i);
     }
     return reversed;
 }
 
-
-
 uint32_t reverse_Xbits(uint32_t value, int width) {
-    // Проверка допустимости ширины (не больше 32 для uint32_t).
+    // Check that width is valid (no more than 32 for uint32_t).
     if (width < 1 || width > 32) {
-        return value; // Можно обработать ошибку иным способом, если нужно.
+        return value; // Could handle error differently if needed.
     }
 
     uint32_t reversed = 0;
     for (int i = 0; i < width; ++i) {
-        // Извлекаем i-й бит исходного значения в пределах заданной ширины
+        // Extract the i-th bit of the original value within the specified width
         uint32_t bit = (value >> i) & 1;
-        // Устанавливаем соответствующий бит в результирующем значении
+        // Set the corresponding bit in the resulting value
         reversed |= bit << (width - 1 - i);
     }
-    // Сохраняем биты за пределами ширины без изменений:
-    uint32_t mask = ~((1u << width) - 1); // маска для битов вне области реверса
+    // Preserve bits beyond the specified width without changes:
+    uint32_t mask = ~((1u << width) - 1); // mask for bits outside reversal area
     reversed |= (value & mask);
 
     return reversed;
@@ -87,23 +85,21 @@ uint32_t reverse_Xbits(uint32_t value, int width) {
 
 //////////////////////////////////////////////////////////////
 
-
-
-// Глобальный буфер для накопления битов пакета и текущая длина в битах
+// Global buffer for accumulating packet bits and current length in bits
 static uint8_t bit_buffer[MAX_BUFFER_SIZE] = {0};
 static int bit_length = 0;
 
-// Функция для добавления новых байтов в битовый буфер
+// Function to add new bytes to the bit buffer
 void append_byte_to_buffer(uint8_t byte) {
-    // Добавляем байт в буфер, предполагая, что буфер достаточно велик
+    // Add byte to the buffer, assuming the buffer is large enough
     int byte_offset = bit_length / 8;
     int bit_offset = bit_length % 8;
 
     if (bit_offset == 0) {
-        // Если байт выровнен по байту, просто запишем
+        // If byte-aligned, just write
         bit_buffer[byte_offset] = byte;
     } else {
-        // Если последний байт не заполнен до конца, заполняем остаток
+        // If the last byte is not completely filled, fill the remainder
         bit_buffer[byte_offset] |= byte << bit_offset;
         if (byte_offset + 1 < MAX_BUFFER_SIZE) {
             bit_buffer[byte_offset + 1] = byte >> (8 - bit_offset);
@@ -112,7 +108,7 @@ void append_byte_to_buffer(uint8_t byte) {
     bit_length += 8;
 }
 
-// Функция для извлечения n битов из буфера, начиная с pos
+// Function to extract n bits from the buffer starting at pos
 uint32_t extract_bits(int pos, int n) {
     uint32_t value = 0;
     for (int i = 0; i < n; ++i) {
@@ -124,15 +120,14 @@ uint32_t extract_bits(int pos, int n) {
     return value;
 }
 
-// Функция обработки и вывода накопленного пакета
+// Function to process and output the accumulated packet
 void process_packet() {
     uint64_t start_timestamp = time_us_64();
     
-
-    if (bit_length == 0) return;  // Если буфер пуст, ничего не делаем
+    if (bit_length == 0) return;  // If buffer is empty, do nothing
 
     int pos = 0;
-    // Извлечение полей согласно заданной структуре
+    // Extract fields according to the given structure
     uint32_t start_bit         = extract_bits(pos, 1); pos += 1;
     uint32_t broadcast_bit     = extract_bits(pos, 1); pos += 1;
     uint32_t master_address    = reverse_Xbits(extract_bits(pos, 12), 12); pos += 12;
@@ -147,7 +142,7 @@ void process_packet() {
     uint32_t message_count_par = extract_bits(pos, 1);  pos += 1;
     uint32_t message_count_ack = extract_bits(pos, 1);  pos += 1;
 
-    // Вывод полей первого сегмента пакета
+    // Output fields of the first packet segment
     // printf("Startbit:%u\t", start_bit);
     // printf("Broadcast:%u\t", broadcast_bit);
     // printf("Master:%03X (P:%u)\t", master_address, master_parity);
@@ -165,9 +160,9 @@ void process_packet() {
     // printf("%u-%u-%u", message_count, message_count_par, message_count_ack);
     printf("%02u", message_count, message_count_par, message_count_ack);
 
-    // Вывод сообщений
+    // Output messages
     for (uint32_t i = 0; i < message_count; ++i) {
-        if (pos + 10 > bit_length) break; // проверка на достаточность битов
+        if (pos + 10 > bit_length) break; // check for sufficient bits
         uint32_t message = extract_bits(pos, 8); pos += 8;
         uint32_t msg_parity = extract_bits(pos, 1); pos += 1;
         uint32_t msg_ack = extract_bits(pos, 1); pos += 1;
@@ -177,23 +172,23 @@ void process_packet() {
         printf("-%02X", i+1, message, msg_parity, msg_ack);
     }
 
-    printf("\n"); // Разделитель между пакетами
+    printf("\n"); // Separator between packets
 
-    // Сброс буфера после обработки
+    // Reset the buffer after processing
     memset(bit_buffer, 0x00, sizeof(bit_buffer));
     bit_length = 0;
     
-    // Фиксируем текущий момент времени в микросекундах
-    // Его мы будем использовать для поправки порога задержки между байтами,
-    // так как во время работы этой функции происходят дополнительные задержки
+    // Record the current time in microseconds
+    // We will use this to adjust the delay threshold between bytes,
+    // since additional delays occur during the execution of this function
     uint64_t current_timestamp = time_us_64();
     calculating_delay = current_timestamp - start_timestamp;
     // printf("process calculate time: %u\n", calculating_delay);
 }
 
-// Главная функция обработки входящих байтов
+// Main function to process incoming bytes
 void process_incoming_byte(uint8_t byte, uint64_t delta) {
-    // Если delta превышает порог, значит предыдущий пакет завершён
+    // If delta exceeds the threshold, the previous packet is finished
     if (delta > (DELTA_THRESHOLD + calculating_delay)) {
         byte_counting = 0;
         // printf("start process_packet\n");
@@ -203,23 +198,18 @@ void process_incoming_byte(uint8_t byte, uint64_t delta) {
         calculating_delay = 0;
     }
     byte_counting++;
-    // Debug вывод количества байт
+    // Debug output of byte count
     // printf("%u - append_byte_to_buffer\n", byte_counting);
-    // Добавляем полученный байт в буфер
+    // Add the received byte to the buffer
     append_byte_to_buffer(byte);
 }
 
 ///////////////////////////////////////////////////////////////
 
-
-
-
-
-
 int main() {
     stdio_init_all();
 
-    // Ждем подключения USB
+    // Wait for USB connection
     while (!stdio_usb_connected()) {
         sleep_ms(100);
     }
@@ -229,7 +219,6 @@ int main() {
     // int sm_tx = pio_claim_unused_sm(pio, true);
     // uint sm_rx = 1;
     int sm_rx = pio_claim_unused_sm(pio, true);
-
 
     // uint offset_tx = pio_add_program(pio, &avc_lan_tx_program);
     uint offset_rx = pio_add_program(pio, &avc_lan_rx_program);
@@ -254,20 +243,16 @@ int main() {
 
     avc_lan_rx_program_init(pio, sm_rx, offset_rx, pin_rx, 60);
 
-
     // avc_lan_rx_program_init(pio, sm_rx, offset_rx, pin_rx, 16);
 
+    // uint example_program_start_bit_offset;    // Offset of the start_bit instruction
+    // uint example_program_do_transmit_offset;  // Offset of the do_transmit instruction
 
-    
-    // uint example_program_start_bit_offset;    // Смещение инструкции start_bit
-    // uint example_program_do_transmit_offset;  // Смещение инструкции do_transmit
-
-    // Получаем абсолютные смещения меток
+    // Obtain absolute label offsets
     // uint start_bit_abs = offset_tx + avc_lan_tx_offset_start;
     // uint stop_bit_abs = offset_tx + avc_lan_tx_offset_stop;
     // uint start_abs = offset_rx + avc_lan_rx_offset_start;
     // uint32_t value = 0;
-
 
     // 
     // pio_sm_set_enabled(pio, sm_tx, false);
@@ -275,7 +260,6 @@ int main() {
     // pio_sm_exec(pio, sm_rx, start_abs);
     // pio_sm_set_enabled(pio, sm_rx, true);
     // pio_sm_put_blocking(pio, sm_rx, 900);
-
 
     // printf("send \n");
     // pio_sm_set_enabled(pio, sm_tx, false);
@@ -288,49 +272,45 @@ int main() {
     // // pio_sm_put_blocking(pio, sm_tx, 0x06);
     // pio_sm_set_enabled(pio, sm_tx, true);
 
-
     printf("start loop \n");
 
     // printf("%s\n", byte_to_bit_string(0x00));
     // printf("%s\n", byte_to_bit_string(0x01));
     // printf("%s\n", byte_to_bit_string(0x02));
 
-
     uint64_t prev_timestamp = time_us_64();
 
     while (true) {
-        
         if (!pio_sm_is_rx_fifo_empty(pio, sm_rx)) {
             // printf("read \n");
             uint8_t byte = (uint8_t)pio_sm_get_blocking(pio, sm_rx);
             
-            // Фиксируем текущий момент времени в микросекундах
+            // Record the current time in microseconds
             uint64_t current_timestamp = time_us_64();
 
-            uint8_t inverted_byte = ~byte; // инвертируем байт
+            uint8_t inverted_byte = ~byte; // invert the byte
             uint8_t reversed_byte = reverse_bits(inverted_byte);
-            // обработка inverted_byte далее...
+            // further processing of inverted_byte...
             // print_byte_bits(inverted_byte);
             // printf(" %u\n", inverted_byte);
 
-            // Debug - для вывода битов 
+            // Debug - for bit output 
             // char *bits = byte_to_bit_string(reversed_byte);
             // printf("%s, %llu us\n", bits, delta);
 
-
             // if (prev_timestamp != 0) {
-                uint64_t delta = current_timestamp - prev_timestamp;
-                process_incoming_byte(reversed_byte, delta);
+            uint64_t delta = current_timestamp - prev_timestamp;
+            process_incoming_byte(reversed_byte, delta);
             // } else {
             //     printf("%s\n", bits);
             // }
 
-            // Обновляем предыдущий таймштамп
+            // Update the previous timestamp
             prev_timestamp = current_timestamp;
             
         } else {
             count_cycles_without_new_data++;
-            if ( (byte_counting > 1) && (count_cycles_without_new_data > LAST_DATA_THRESHOLD)) {
+            if ((byte_counting > 1) && (count_cycles_without_new_data > LAST_DATA_THRESHOLD)) {
                 byte_counting = 0;
                 // printf("start process_packet\n"); 
                 process_packet();
