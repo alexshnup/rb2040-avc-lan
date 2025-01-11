@@ -11,6 +11,10 @@ const uint pin_rx = 4;
 uint32_t calculating_delay = 0;
 uint32_t byte_counting = 0;
 
+// используется для отправки последнего пакета. Так как у нас отправка по факту после прихода нового по умолчанию
+uint64_t count_cycles_without_new_data = 0;
+#define LAST_DATA_THRESHOLD 50000 
+
 #define MAX_BUFFER_SIZE 1024  // макс. размер буфера в байтах
 #define DELTA_THRESHOLD 1000   // порог в микросекундах
 
@@ -144,12 +148,22 @@ void process_packet() {
     uint32_t message_count_ack = extract_bits(pos, 1);  pos += 1;
 
     // Вывод полей первого сегмента пакета
-    printf("Startbit:%u\t", start_bit);
-    printf("Broadcast:%u\t", broadcast_bit);
-    printf("Master:%03X (P:%u)\t", master_address, master_parity);
-    printf("Slave:%03X (P:%u, ACK:%u)\t", slave_address, slave_parity, slave_ack);
-    printf("Controlbit:%02X (P:%u, ACK:%u)\t", control_field, control_parity, control_ack);
-    printf("Lenght:%u (P:%u, ACK:%u)\n", message_count, message_count_par, message_count_ack);
+    // printf("Startbit:%u\t", start_bit);
+    // printf("Broadcast:%u\t", broadcast_bit);
+    // printf("Master:%03X (P:%u)\t", master_address, master_parity);
+    // printf("Slave:%03X (P:%u, ACK:%u)\t", slave_address, slave_parity, slave_ack);
+    // printf("Controlbit:%01X (P:%u, ACK:%u)\t", control_field, control_parity, control_ack);
+    // printf("Lenght:%u (P:%u, ACK:%u)\n", message_count, message_count_par, message_count_ack);
+    printf("%02X-", start_bit);
+    printf("%02X-", broadcast_bit);
+    // printf("%04X-%u-", master_address, master_parity);
+    printf("%04X-", master_address, master_parity);
+    // printf("%04X-%u-%u-", slave_address, slave_parity, slave_ack);
+    printf("%04X-", slave_address, slave_parity, slave_ack);
+    // printf("%02X-%u-%u-", control_field, control_parity, control_ack);
+    printf("%02X-", control_field, control_parity, control_ack);
+    // printf("%u-%u-%u", message_count, message_count_par, message_count_ack);
+    printf("%02u", message_count, message_count_par, message_count_ack);
 
     // Вывод сообщений
     for (uint32_t i = 0; i < message_count; ++i) {
@@ -158,7 +172,9 @@ void process_packet() {
         uint32_t msg_parity = extract_bits(pos, 1); pos += 1;
         uint32_t msg_ack = extract_bits(pos, 1); pos += 1;
 
-        printf("D:%u:\t%02X (P:%u, ACK:%u)\n", i+1, message, msg_parity, msg_ack);
+        // printf("D:%u:\t%02X (P:%u, ACK:%u)\n", i+1, message, msg_parity, msg_ack);
+        // printf("-%02X-%u-%u)", i+1, message, msg_parity, msg_ack);
+        printf("-%02X", i+1, message, msg_parity, msg_ack);
     }
 
     printf("\n"); // Разделитель между пакетами
@@ -172,7 +188,7 @@ void process_packet() {
     // так как во время работы этой функции происходят дополнительные задержки
     uint64_t current_timestamp = time_us_64();
     calculating_delay = current_timestamp - start_timestamp;
-    printf("process calculate time: %u\n", calculating_delay);
+    // printf("process calculate time: %u\n", calculating_delay);
 }
 
 // Главная функция обработки входящих байтов
@@ -180,13 +196,15 @@ void process_incoming_byte(uint8_t byte, uint64_t delta) {
     // Если delta превышает порог, значит предыдущий пакет завершён
     if (delta > (DELTA_THRESHOLD + calculating_delay)) {
         byte_counting = 0;
-        printf("start process_packet\n");
+        // printf("start process_packet\n");
         process_packet();
+        count_cycles_without_new_data = 0;
     } else {
         calculating_delay = 0;
     }
     byte_counting++;
-    printf("%u - append_byte_to_buffer\n", byte_counting);
+    // Debug вывод количества байт
+    // printf("%u - append_byte_to_buffer\n", byte_counting);
     // Добавляем полученный байт в буфер
     append_byte_to_buffer(byte);
 }
@@ -279,6 +297,7 @@ int main() {
 
 
     uint64_t prev_timestamp = time_us_64();
+
     while (true) {
         
         if (!pio_sm_is_rx_fifo_empty(pio, sm_rx)) {
@@ -294,12 +313,13 @@ int main() {
             // print_byte_bits(inverted_byte);
             // printf(" %u\n", inverted_byte);
 
-            char *bits = byte_to_bit_string(reversed_byte);
+            // Debug - для вывода битов 
+            // char *bits = byte_to_bit_string(reversed_byte);
+            // printf("%s, %llu us\n", bits, delta);
 
 
             // if (prev_timestamp != 0) {
                 uint64_t delta = current_timestamp - prev_timestamp;
-                printf("%s, %llu us\n", bits, delta);
                 process_incoming_byte(reversed_byte, delta);
             // } else {
             //     printf("%s\n", bits);
@@ -308,6 +328,14 @@ int main() {
             // Обновляем предыдущий таймштамп
             prev_timestamp = current_timestamp;
             
-        } 
+        } else {
+            count_cycles_without_new_data++;
+            if ( (byte_counting > 1) && (count_cycles_without_new_data > LAST_DATA_THRESHOLD)) {
+                byte_counting = 0;
+                // printf("start process_packet\n"); 
+                process_packet();
+                count_cycles_without_new_data = 0;
+            }
+        }
     }
 }

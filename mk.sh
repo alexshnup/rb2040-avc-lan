@@ -12,13 +12,13 @@ while true; do
     if mount | grep -q '/Volumes/RPI-RP2'; then
         # Пытаемся скопировать файл
         if cp avc_lan_capture.uf2 /Volumes/RPI-RP2/; then
-            echo "Файл успешно скопирован."
+            echo "Copy ok."
             break
         else
-            echo "Ошибка при копировании файла. Попробую снова..."
+            echo "Error copy... Will try again"
         fi
     else
-        echo "Диск не подключен. Жду..."
+        echo "Volume is not connected, Waiting..."
     fi
     sleep 1 # Ждем 5 секунд перед повторной проверкой
 done
