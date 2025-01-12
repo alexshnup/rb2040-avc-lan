@@ -22,12 +22,6 @@ uint32_t LAST_DATA_THRESHOLD = 50000;
 
 #define CMD_BUFFER_SIZE 100
 
-PIO global_pio_instance_tx;
-PIO global_pio_instance_rx;
-uint global_sm_tx;
-uint global_sm_rx;
-uint global_start_bit_abs;
-
 void print_bits(uint32_t value) {
     // Iterate over bits from the most significant (31) to the least significant (0)
     for (int i = 31; i >= 0; i--) {
@@ -219,7 +213,7 @@ void process_incoming_byte(uint8_t byte, uint64_t delta) {
 ///////////////////////////////////////////////////////////////
 
 // структура для хранения информации о команде
-typedef void (*command_handler_t)(const char* args);
+typedef void (*command_handler_t)(PIO pio, uint sm, uint exec_start, const char* args);
 
 typedef struct {
     const char* name;
@@ -238,7 +232,7 @@ void handle_status(const char* args) {
     printf("Current LAST_DATA_THRESHOLD: %d\n", LAST_DATA_THRESHOLD);
 }
 
-void handle_send(const char* args) {
+void handle_send(PIO pio, uint sm, uint exec_start, const char* args) {
     // Создаём копию строки, так как strtok модифицирует её
     char* args_copy = strdup(args);
     if (!args_copy) {
@@ -246,11 +240,10 @@ void handle_send(const char* args) {
         return;
     }
 
-    pio_sm_set_enabled(global_pio_instance_tx, global_sm_tx, false);
-    pio_sm_exec(global_pio_instance_tx, global_sm_tx, global_start_bit_abs);
-    // pio_sm_exec(pio, sm, start_bit_abs);
-    // pio_sm_put_blocking(global_pio_instance_tx, global_sm_tx, 0x00);
-    // pio_sm_put_blocking(global_pio_instance_tx, global_sm_tx, 0x01);
+    pio_sm_set_enabled(pio, sm, false);
+    pio_sm_exec(pio, sm, exec_start);
+    // pio_sm_put_blocking(pio1_instance_tx, sm_tx, 0x00);
+    // pio_sm_put_blocking(pio1_instance_tx, sm_tx, 0x01);
 
     // Используем strtok для разбивки строки по пробелам
     char* token = strtok(args_copy, " ");
@@ -262,15 +255,13 @@ void handle_send(const char* args) {
         // Обработка значения
         printf("\nParsed value: 0x%X\n", value);
 
-        pio_sm_put_blocking(global_pio_instance_tx, global_sm_tx, value);
-
         
         // Получаем следующий токен
         token = strtok(NULL, " ");
     }
 
     // запускаем PIO для передачи
-    pio_sm_set_enabled(global_pio_instance_tx, global_sm_tx, true);
+    // pio_sm_set_enabled(pio1_instance_tx, sm_tx, true);
 
     // Освобождаем память, выделенную strdup
     free(args_copy);
@@ -293,7 +284,7 @@ command_t commands[COMMAND_COUNT] = {
     // Добавляйте новые команды здесь но не забываем инкрементировать COMMAND_COUNT
 };
 
-void process_command(char* input_line) {
+void process_command(PIO pio, uint sm, uint exec_start, char* input_line) {
     // Разделим команду и аргументы
     char* command_name = strtok(input_line, " ");
     char* args = strtok(NULL, "\n");  // вся оставшаяся строка как аргументы
@@ -302,7 +293,7 @@ void process_command(char* input_line) {
 
     for (int i = 0; i < COMMAND_COUNT; ++i) {
         if (strcmp(command_name, commands[i].name) == 0) {
-            commands[i].handler(args);
+            commands[i].handler(pio, sm, exec_start, args);
             return;
         }
     }
@@ -321,57 +312,54 @@ int main() {
         sleep_ms(100);
     }
 
-    // PIO global_pio_instance_rx = pio0;
-    // PIO global_pio_instance_tx = pio1;
+    PIO pio0_instance_rx = pio0;
+    PIO pio1_instance_tx = pio1;
+    // uint sm_tx = 0;
+    // uint sm_rx = 8;
+    int sm_rx = pio_claim_unused_sm(pio0_instance_rx, true);
+    int sm_tx = pio_claim_unused_sm(pio1_instance_tx, true);
 
-    global_pio_instance_tx = pio0;
-    global_pio_instance_rx = pio1;
 
-    // uint global_sm_tx = 0;
-    // uint global_sm_rx = 8;
-    global_sm_rx = pio_claim_unused_sm(global_pio_instance_rx, true);
-    global_sm_tx = pio_claim_unused_sm(global_pio_instance_tx, true);
-
-    uint offset_rx = pio_add_program(global_pio_instance_rx, &avc_lan_rx_program);
-    uint offset_tx = pio_add_program(global_pio_instance_tx, &avc_lan_tx_program);
+    uint offset_rx = pio_add_program(pio0_instance_rx, &avc_lan_rx_program);
+    uint offset_tx = pio_add_program(pio1_instance_tx, &avc_lan_tx_program);
 
     printf("Receive program loaded at %d\n", offset_rx);
     printf("Transmit program loaded at %d\n", offset_tx);
 
     // // Configure state machines, set bit rate at 5 Mbps
-    // avc_lan_tx_program_init(pio, global_sm_tx, offset_tx, pin_tx, 125.f / (16 * 5));
-    // avc_lan_rx_program_init(pio, global_sm_rx, offset_rx, pin_rx, 125.f / (16 * 5));
+    // avc_lan_tx_program_init(pio, sm_tx, offset_tx, pin_tx, 125.f / (16 * 5));
+    // avc_lan_rx_program_init(pio, sm_rx, offset_rx, pin_rx, 125.f / (16 * 5));
 
     // // Configure state machines, set bit rate at 10 KHz
-    // avc_lan_tx_program_init(pio, global_sm_tx, offset_tx, pin_tx, 390.625);
-    // avc_lan_rx_program_init(pio, global_sm_rx, offset_rx, pin_rx, 390.625);
+    // avc_lan_tx_program_init(pio, sm_tx, offset_tx, pin_tx, 390.625);
+    // avc_lan_rx_program_init(pio, sm_rx, offset_rx, pin_rx, 390.625);
 
     // Configure state machines, set bit rate at 20 KHz
-    // avc_lan_tx_program_init(pio, global_sm_tx, offset_tx, pin_tx, 195.3125);
-    // avc_lan_rx_program_init(pio, global_sm_rx, offset_rx, pin_rx, 195.3125);
+    // avc_lan_tx_program_init(pio, sm_tx, offset_tx, pin_tx, 195.3125);
+    // avc_lan_rx_program_init(pio, sm_rx, offset_rx, pin_rx, 195.3125);
 
-    // avc_lan_rx_program_init(pio, global_sm_rx, offset_rx, pin_rx, 125.f);
+    // avc_lan_rx_program_init(pio, sm_rx, offset_rx, pin_rx, 125.f);
 
-    avc_lan_rx_program_init(global_pio_instance_rx, global_sm_rx, offset_rx, pin_rx, 60);
-    avc_lan_tx_program_init(global_pio_instance_tx, global_sm_tx, offset_tx, pin_tx_high, 400);
+    avc_lan_rx_program_init(pio0_instance_rx, sm_rx, offset_rx, pin_rx, 60);
+    avc_lan_tx_program_init(pio1_instance_tx, sm_tx, offset_tx, pin_tx_high, 400);
 
-    // avc_lan_rx_program_init(pio, global_sm_rx, offset_rx, pin_rx, 16);
+    // avc_lan_rx_program_init(pio, sm_rx, offset_rx, pin_rx, 16);
 
     // uint example_program_start_bit_offset;    // Offset of the start_bit instruction
     // uint example_program_do_transmit_offset;  // Offset of the do_transmit instruction
 
     // Obtain absolute label offsets
-    global_start_bit_abs = offset_tx + avc_lan_tx_offset_start;
+    uint start_bit_abs = offset_tx + avc_lan_tx_offset_start;
     // uint stop_bit_abs = offset_tx + avc_lan_tx_offset_stop;
     // uint32_t value = 0;
 
     // 
     // printf("send \n");
-    // pio_sm_set_enabled(global_pio_instance_tx, global_sm_tx, false);
-    // pio_sm_exec(global_pio_instance_tx, global_sm_tx, global_start_bit_abs);
-    // pio_sm_put_blocking(global_pio_instance_tx, global_sm_tx, 0x00);
-    // pio_sm_put_blocking(global_pio_instance_tx, global_sm_tx, 0x01);
-    // pio_sm_set_enabled(global_pio_instance_tx, global_sm_tx, true);
+    // pio_sm_set_enabled(pio1_instance_tx, sm_tx, false);
+    // pio_sm_exec(pio1_instance_tx, sm_tx, start_bit_abs);
+    // pio_sm_put_blocking(pio1_instance_tx, sm_tx, 0x00);
+    // pio_sm_put_blocking(pio1_instance_tx, sm_tx, 0x01);
+    // pio_sm_set_enabled(pio1_instance_tx, sm_tx, true);
 
     printf("start loop \n");
 
@@ -397,7 +385,7 @@ int main() {
                     command_line[strcspn(command_line, "\r\n")] = 0;
                     
                     // Обработка заполненной команды
-                    process_command(command_line);
+                    process_command(pio1_instance_tx, sm_tx, start_bit_abs, command_line);
 
                     memset(command_line, 0, sizeof(command_line));
                     cmd_index = 0;
@@ -410,9 +398,9 @@ int main() {
             }
         }
 
-        if (!pio_sm_is_rx_fifo_empty(global_pio_instance_rx, global_sm_rx)) {
+        if (!pio_sm_is_rx_fifo_empty(pio0_instance_rx, sm_rx)) {
             // printf("read \n");
-            uint8_t byte = (uint8_t)pio_sm_get_blocking(global_pio_instance_rx, global_sm_rx);
+            uint8_t byte = (uint8_t)pio_sm_get_blocking(pio0_instance_rx, sm_rx);
             
             // Record the current time in microseconds
             uint64_t current_timestamp = time_us_64();
