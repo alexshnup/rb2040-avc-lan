@@ -22,6 +22,21 @@ uint32_t LAST_DATA_THRESHOLD = 50000;
 
 #define CMD_BUFFER_SIZE 100
 
+// Функция вычисляет нечётный бит чётности для байта.
+// Возвращает 1, если количество единичных битов нечётно, иначе 0.
+uint8_t parity_bit(uint32_t byte) {
+    // Переменная для хранения результата XOR всех битов
+    uint8_t parity = 0;
+
+    // Перебираем все 8 битов байта
+    for (int i = 0; i < 32; i++) {
+        // XOR текущий бит с результатом parity
+        parity ^= (byte >> i) & 1;
+    }
+
+    return parity;
+}
+
 void print_bits(uint32_t value) {
     // Iterate over bits from the most significant (31) to the least significant (0)
     for (int i = 31; i >= 0; i--) {
@@ -132,19 +147,19 @@ void process_packet() {
 
     int pos = 0;
     // Extract fields according to the given structure
-    uint32_t start_bit         = extract_bits(pos, 1); pos += 1;
-    uint32_t broadcast_bit     = extract_bits(pos, 1); pos += 1;
-    uint32_t master_address    = reverse_Xbits(extract_bits(pos, 12), 12); pos += 12;
-    uint32_t master_parity     = extract_bits(pos, 1);  pos += 1;
-    uint32_t slave_address     = reverse_Xbits(extract_bits(pos, 12), 12); pos += 12;
-    uint32_t slave_parity      = extract_bits(pos, 1);  pos += 1;
-    uint32_t slave_ack         = extract_bits(pos, 1);  pos += 1;
-    uint32_t control_field     = reverse_Xbits(extract_bits(pos, 4), 4);  pos += 4;
-    uint32_t control_parity    = extract_bits(pos, 1);  pos += 1;
-    uint32_t control_ack       = extract_bits(pos, 1);  pos += 1;
-    uint32_t message_count     = reverse_Xbits(extract_bits(pos, 8), 8);  pos += 8;
-    uint32_t message_count_par = extract_bits(pos, 1);  pos += 1;
-    uint32_t message_count_ack = extract_bits(pos, 1);  pos += 1;
+    uint8_t start_bit         = extract_bits(pos, 1); pos += 1;
+    uint8_t broadcast_bit     = extract_bits(pos, 1); pos += 1;
+    uint16_t master_address    = reverse_Xbits(extract_bits(pos, 12), 12); pos += 12;
+    uint8_t master_parity     = extract_bits(pos, 1);  pos += 1;
+    uint16_t slave_address     = reverse_Xbits(extract_bits(pos, 12), 12); pos += 12;
+    uint8_t slave_parity      = extract_bits(pos, 1);  pos += 1;
+    uint8_t slave_ack         = extract_bits(pos, 1);  pos += 1;
+    uint8_t control_field     = reverse_Xbits(extract_bits(pos, 4), 4);  pos += 4;
+    uint8_t control_parity    = extract_bits(pos, 1);  pos += 1;
+    uint8_t control_ack       = extract_bits(pos, 1);  pos += 1;
+    uint8_t message_count     = reverse_Xbits(extract_bits(pos, 8), 8);  pos += 8;
+    uint8_t message_count_par = extract_bits(pos, 1);  pos += 1;
+    uint8_t message_count_ack = extract_bits(pos, 1);  pos += 1;
 
     // Output fields of the first packet segment
     // printf("Startbit:%u\t", start_bit);
@@ -153,30 +168,69 @@ void process_packet() {
     // printf("Slave:%03X (P:%u, ACK:%u)\t", slave_address, slave_parity, slave_ack);
     // printf("Controlbit:%01X (P:%u, ACK:%u)\t", control_field, control_parity, control_ack);
     // printf("Lenght:%u (P:%u, ACK:%u)\n", message_count, message_count_par, message_count_ack);
-    printf("%02X ", start_bit);
-    printf("%02X ", broadcast_bit);
-    // printf("%04X-%u-", master_address, master_parity);
-    printf("%04X ", master_address, master_parity);
-    // printf("%04X-%u-%u-", slave_address, slave_parity, slave_ack);
-    printf("%04X ", slave_address, slave_parity, slave_ack);
-    // printf("%02X-%u-%u-", control_field, control_parity, control_ack);
-    printf("%02X ", control_field, control_parity, control_ack);
-    // printf("%u-%u-%u", message_count, message_count_par, message_count_ack);
-    printf("%02u", message_count, message_count_par, message_count_ack);
+    printf("%u ", start_bit);
+    printf("%u ", broadcast_bit);
+    printf("%03X %u ", master_address, master_parity);
+    // printf("%03X ", master_address, master_parity);
+    printf("%03X %u %u ", slave_address, slave_parity, slave_ack);
+    // printf("%03X ", slave_address, slave_parity, slave_ack);
+    printf("%01X %u %u ", control_field, control_parity, control_ack);
+    // printf("%01X ", control_field, control_parity, control_ack);
+    printf("%02x %u %u", message_count, message_count_par, message_count_ack);
+    // printf("%02u", message_count, message_count_par, message_count_ack);
 
+
+    uint8_t parity = 0;
     // Output messages
     for (uint32_t i = 0; i < message_count; ++i) {
         if (pos + 10 > bit_length) break; // check for sufficient bits
-        uint32_t message = extract_bits(pos, 8); pos += 8;
-        uint32_t msg_parity = extract_bits(pos, 1); pos += 1;
-        uint32_t msg_ack = extract_bits(pos, 1); pos += 1;
+        uint8_t message = extract_bits(pos, 8); pos += 8;
+        uint8_t msg_parity = extract_bits(pos, 1); pos += 1;
+        uint8_t msg_ack = extract_bits(pos, 1); pos += 1;
+
+        parity = parity_bit(message) & 0x01;
+        if (parity != msg_parity) {
+            printf(" |ERROR data parity %u is %u not %u|", i, msg_parity, parity);
+        }
+        if (0x01 != msg_ack) {
+            printf(" |ERROR ACK msg_ack|");
+        }
 
         // printf("D:%u:\t%02X (P:%u, ACK:%u)\n", i+1, message, msg_parity, msg_ack);
         // printf("-%02X-%u-%u)", i+1, message, msg_parity, msg_ack);
-        printf(" %02X", i+1, message, msg_parity, msg_ack);
+        // printf(" %02X %u %u", message, msg_parity, msg_ack);
+        printf(" %02X", message, msg_parity, msg_ack);
     }
 
     printf("\n"); // Separator between packets
+
+    parity = parity_bit(master_address) & 0x01;
+    if (parity != master_parity) {
+        printf(" |ERROR master_address parity is %u not %u|", master_parity, parity);
+    }
+    parity = parity_bit(slave_address) & 0x01;
+    if (parity != slave_parity) {
+        printf(" |ERROR slave_address parity|");
+    }
+    parity = parity_bit(control_field) & 0x01;
+    if (parity != control_parity) {
+        printf(" |ERROR control_field parity|");
+    }
+    parity = parity_bit(message_count) & 0x01;
+    if (parity != message_count_par) {
+        printf(" |ERROR message_count parity|");
+    }
+
+    if (0x01 != slave_ack) {
+        printf(" |ERROR ACK slave_ack|");
+    }
+    if (0x01 != control_ack) {
+        printf(" |ERROR ACK control_ack|");
+    }
+    if (0x01 != message_count_ack) {
+        printf(" |ERROR ACK message_count_ack|");
+    }
+
 
     // Reset the buffer after processing
     memset(bit_buffer, 0x00, sizeof(bit_buffer));
@@ -208,6 +262,153 @@ void process_incoming_byte(uint8_t byte, uint64_t delta) {
     append_byte_to_buffer(byte);
 }
 
+
+///////////////////////////////////////////////////////////////
+// Формирование пакета
+///////////////////////////////////////////////////////////////
+
+// Функция для записи битов в массив байтов справа налево,
+// беря биты от старшего к младшему внутри каждого поля.
+void write_bits(uint8_t* bytes, size_t* bit_pos, uint32_t value, size_t bit_count) {
+    for (ssize_t i = bit_count - 1; i >= 0; --i) {
+        size_t pos = *bit_pos;
+        size_t byte_idx = pos / 8;
+        size_t bit_idx = pos % 8;
+        uint8_t bit = (value >> i) & 0x01;
+        if (bit) {
+            bytes[byte_idx] |= (1 << bit_idx);
+        } else {
+            bytes[byte_idx] &= ~(1 << bit_idx);
+        }
+        (*bit_pos)++;
+    }
+}
+
+size_t parse_protocol_string(const char* input, uint8_t** output) {
+    // Разбивка строки на токены
+    char* str = strdup(input);
+    if (!str) return 0;
+    const char* delim = " ";
+    char* token = strtok(str, delim);
+    char* tokens[512];  // Предполагаем максимум токенов
+    size_t token_count = 0;
+    while (token && token_count < 512) {
+        tokens[token_count++] = token;
+        token = strtok(NULL, delim);
+    }
+
+    size_t max_bytes = 512;
+    uint8_t* bytes = (uint8_t*)calloc(max_bytes, sizeof(uint8_t));
+    size_t bit_pos = 0;
+
+    // Обработка каждого поля по порядку:
+
+    // 1. Broadcast bit (1 бит)
+    if (token_count > 0) {
+        uint32_t broadcast = (uint32_t)strtol(tokens[0], NULL, 10) & 0x01;
+        write_bits(bytes, &bit_pos, broadcast, 1);
+    }
+
+    // 2. Master address (12 бит)
+    uint16_t master_address = 0xFFF;
+    if (token_count > 1) {
+        master_address = (uint16_t)strtol(tokens[1], NULL, 16) & 0xFFF;
+        write_bits(bytes, &bit_pos, master_address, 12);
+    }
+
+    // 3. Бит четности (1 бит)
+    if (token_count > 1) {
+        uint8_t parity = parity_bit(master_address) & 0x01;
+        write_bits(bytes, &bit_pos, parity, 1);
+    }
+
+    // 4. Slave address (12 бит)
+    uint16_t slave_address = 0xFFF;
+    if (token_count > 2) {
+        slave_address = (uint16_t)strtol(tokens[3], NULL, 16) & 0xFFF;
+        write_bits(bytes, &bit_pos, slave_address, 12);
+    }
+
+    // 5. Бит четности (1 бит)
+    if (token_count > 2) {
+        uint8_t parity = parity_bit(slave_address) & 0x01;
+        write_bits(bytes, &bit_pos, parity, 1);
+    }
+
+    // 6. Бит ACK (1 бит)
+    if (token_count > 2) {
+        write_bits(bytes, &bit_pos, 0x01, 1);
+    }
+
+    // 7. Control bits (4 бита)
+    uint8_t control_bits = 0xF;
+    if (token_count > 3) {
+        control_bits = (uint8_t)strtol(tokens[6], NULL, 8) & 0xF;
+        write_bits(bytes, &bit_pos, control_bits, 4);
+    }
+
+    // 8. Бит четности (1 бит)
+    if (token_count > 3) {
+        uint8_t parity = parity_bit(control_bits) & 0x01;
+        write_bits(bytes, &bit_pos, parity, 1);
+    }
+
+    // 9. Бит ACK (1 бит)
+    if (token_count > 3) {
+        write_bits(bytes, &bit_pos, 0x01, 1);
+    }
+
+    // 10. Длина данных (8 бит)
+    uint8_t data_length = 0;
+    if (token_count > 4) {
+        data_length = (uint8_t)strtol(tokens[9], NULL, 8) & 0xFF;
+        write_bits(bytes, &bit_pos, data_length, 8);
+    }
+
+    // 11. Бит четности (1 бит)
+    if (token_count > 4) {
+        uint8_t parity = parity_bit(data_length) & 0x01;
+        write_bits(bytes, &bit_pos, parity, 1);
+    }
+
+    // 12. Бит ACK (1 бит)
+    if (token_count > 4) {
+        write_bits(bytes, &bit_pos, 0x01, 1);
+    }
+
+    // 11. Обработка байтов данных
+    size_t token_index = 5; // Начальный индекс для данных
+    for (uint8_t i = 0; i < data_length; ++i) {
+        // Удостоверимся, что есть как минимум 10 токенов для каждого байта данных
+        if (token_index + 10 <= token_count) {
+            // 11.1. 8 бит данных
+            uint8_t data_byte = (uint8_t)strtol(tokens[token_index], NULL, 8) & 0xFF;
+            write_bits(bytes, &bit_pos, data_byte, 8);
+            token_index++;
+
+            // 11.2. Бит четности (1 бит)
+            uint8_t parity = parity_bit(data_byte) & 0x01;
+            write_bits(bytes, &bit_pos, parity, 1);
+            token_index++;
+
+            // 11.3. Бит ACK (1 бит)
+            write_bits(bytes, &bit_pos, 0x01, 1);
+            token_index++;
+        } else {
+            // Если токенов недостаточно для очередного байта данных, прерываем цикл.
+            break;
+        }
+    }
+
+    free(str);
+    *output = bytes;
+    size_t byte_len = (bit_pos + 7) / 8;
+    return byte_len;
+}
+
+///////////////////////////////////////////////////////////////
+
+
 ///////////////////////////////////////////////////////////////
 // console
 ///////////////////////////////////////////////////////////////
@@ -221,18 +422,21 @@ typedef struct {
 } command_t;
 
 // объявим обработчики для разных команд
-void handle_set_dt(const char* args) {
+void handle_set_dt(PIO pio, uint sm, uint exec_start, const char* args) {
     int value = atoi(args);
     LAST_DATA_THRESHOLD = value;
     printf("LAST_DATA_THRESHOLD set to %d\n", LAST_DATA_THRESHOLD);
 }
 
-void handle_status(const char* args) {
+void handle_status(PIO pio, uint sm, uint exec_start, const char* args) {
     (void)args;  // Игнорируем args, если не нужны
     printf("Current LAST_DATA_THRESHOLD: %d\n", LAST_DATA_THRESHOLD);
 }
 
 void handle_send(PIO pio, uint sm, uint exec_start, const char* args) {
+
+    printf("\n");
+
     // Создаём копию строки, так как strtok модифицирует её
     char* args_copy = strdup(args);
     if (!args_copy) {
@@ -240,31 +444,46 @@ void handle_send(PIO pio, uint sm, uint exec_start, const char* args) {
         return;
     }
 
+
     pio_sm_set_enabled(pio, sm, false);
     pio_sm_exec(pio, sm, exec_start);
-    // pio_sm_put_blocking(pio1_instance_tx, sm_tx, 0x00);
-    // pio_sm_put_blocking(pio1_instance_tx, sm_tx, 0x01);
 
-    // Используем strtok для разбивки строки по пробелам
-    char* token = strtok(args_copy, " ");
-    while (token != NULL) {
-        // Здесь token содержит очередной элемент, разделённый пробелом
-        // Пример: преобразование из шестнадцатеричной строки в число
-        unsigned int value = (unsigned int)strtoul(token, NULL, 16);
-        
-        // Обработка значения
-        printf("\nParsed value: 0x%X\n", value);
+    // pio_sm_set_enabled(pio, sm, false);
+    // pio_sm_exec(pio, sm, exec_start);
+    // pio_sm_put_blocking(pio, sm, 0x50);
+    // pio_sm_put_blocking(pio, sm, 0xC0);
+    // pio_sm_put_blocking(pio, sm, 0xFF);
+    // pio_sm_put_blocking(pio, sm, 0xFB);
+    // pio_sm_put_blocking(pio, sm, 0x02);
 
+    // const char* input = "0 140 0 FFF 0 1 F 0 1 03 0 1 48 0 1 80 1 1 80 1 1";
+    uint8_t* output = NULL;
+    size_t output_len = parse_protocol_string(args_copy, &output);
+    // size_t output_len = parse_protocol_string(input, &output);
+
+    for (size_t i = 0; i < output_len; ++i) {
+        // printf("\n%02X-", output[i]);
+        pio_sm_put_blocking(pio, sm, output[i]);
+        if (i == 0) {
+            // запускаем PIO для передачи
+            pio_sm_set_enabled(pio, sm, true);
+        }
         
-        // Получаем следующий токен
-        token = strtok(NULL, " ");
+        // // sleep_ms(1); 
+
+        // Вывод результата в двоичном формате для проверки
+        // for (int bit = 7; bit >= 0; --bit) {
+        //     printf("%d", (output[i] >> bit) & 1);
+        // }
+        // printf(" ");
     }
 
-    // запускаем PIO для передачи
-    // pio_sm_set_enabled(pio1_instance_tx, sm_tx, true);
+    free(output);
+
 
     // Освобождаем память, выделенную strdup
     free(args_copy);
+
 }
 
 void handle_unknown(const char* cmd) {
@@ -280,7 +499,7 @@ void handle_unknown(const char* cmd) {
 command_t commands[COMMAND_COUNT] = {
     {"set_dt", handle_set_dt},
     {"status", handle_status},
-    {"01", handle_send},
+    {"1", handle_send},
     // Добавляйте новые команды здесь но не забываем инкрементировать COMMAND_COUNT
 };
 
@@ -304,6 +523,8 @@ void process_command(PIO pio, uint sm, uint exec_start, char* input_line) {
 
 
 
+
+
 int main() {
     stdio_init_all();
 
@@ -311,6 +532,24 @@ int main() {
     while (!stdio_usb_connected()) {
         sleep_ms(100);
     }
+
+    // DEBUG package generator
+    // const char* input = "0 140 0 FFF 0 1 F 0 1 03 0 1 01 1 02 1 03 0";
+    // uint8_t* output = NULL;
+    // size_t output_len = parse_protocol_string(input, &output);
+
+    // // Вывод результата в двоичном формате для проверки
+    // for (size_t i = 0; i < output_len; ++i) {
+    //     for (int bit = 7; bit >= 0; --bit) {
+    //         printf("%d", (output[i] >> bit) & 1);
+    //     }
+    //     printf(" ");
+    // }
+    // printf("\n");
+
+    // free(output);
+    // return 0;
+
 
     PIO pio0_instance_rx = pio0;
     PIO pio1_instance_tx = pio1;
@@ -421,8 +660,8 @@ int main() {
 
 
             // // Debug - for bit output 
-            // char *bits = byte_to_bit_string(reversed_byte);
-            // printf("%s, %llu us\n", bits, delta);
+            char *bits = byte_to_bit_string(reversed_byte);
+            printf("%s, %llu us\n", bits, delta);
 
 
             // Update the previous timestamp

@@ -87,7 +87,7 @@ static inline void avc_lan_tx_program_init(PIO pio, uint sm, uint offset, uint p
     pio_sm_config c = avc_lan_tx_program_get_default_config(offset);
     sm_config_set_sideset_pins(&c, pin);
     sm_config_set_out_shift(&c, true, true, 8);
-    //sm_config_set_fifo_join(&c, PIO_FIFO_JOIN_TX);
+    sm_config_set_fifo_join(&c, PIO_FIFO_JOIN_TX);
     sm_config_set_clkdiv(&c, div);
     pio_sm_init(pio, sm, offset + avc_lan_tx_offset_start, &c);
 
@@ -102,7 +102,7 @@ static inline void avc_lan_tx_program_init(PIO pio, uint sm, uint offset, uint p
 ; Parameters/constants
 ;
 .define MAX_COUNT      30            
-.define THRESHOLD      16           ; Conditional threshold (in "loop iterations")
+.define THRESHOLD      20           ; Conditional threshold (in "loop iterations")
 ; Parameters (if desired, you can use .define etc.)
 ; For example, we want to push bytes (8 bits).
 ; .shift_right 0        ; shift ISR right on IN command
@@ -126,7 +126,7 @@ wait_while_high:
 ; ------------------------------------------------------------------------
 ; Prepare X for a "long" counter
 ; ------------------------------------------------------------------------
-    set x, 31
+    set x, MAX_COUNT
     ; mov x, ~x       ; X ~ 0xFFFFFFE0 (~0xFFFFFFFF, but slightly less)
 
 ; ------------------------------------------------------------------------
@@ -156,7 +156,7 @@ timeout_done:
 ; Some value remains in X. Compare with THRESHOLD using Y.
 ; ------------------------------------------------------------------------
 measure_done:
-    set y, 16
+    set y, THRESHOLD
     ; mov y, ~y       ; THRESHOLD conditional, ~10 = 0xFFFFFFF5
 
 compare_loop:
