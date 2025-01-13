@@ -10,7 +10,7 @@ make || exit
 
 while true; do
     if mount | grep -q '/Volumes/RPI-RP2'; then
-        # Пытаемся скопировать файл
+        # Attempt to copy the file
         if cp avc_lan_capture.uf2 /Volumes/RPI-RP2/; then
             echo "Copy ok."
             break
@@ -20,7 +20,7 @@ while true; do
     else
         echo "Volume is not connected, Waiting..."
     fi
-    sleep 1 # Ждем 5 секунд перед повторной проверкой
+    sleep 1 # Wait 1 second before checking again
 done
 
 # cp avc_lan_capture.uf2 /Volumes/RPI-RP2/
