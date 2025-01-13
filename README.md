@@ -16,15 +16,14 @@ To send data over the AVC-LAN bus, connect to the Pico's console (e.g., via USB 
 1 0 140 440 F 04 01 02 03 04
 ```
 Command Breakdown:
-
-1 – Command identifier to send data.
-0 – Broadcast bit.
-140 – Master address.
-440 – Slave address.
-F – Control field.
-04 – Data length (4 bytes).
-01 02 03 04 – Data bytes to send.
-After entering this command, the program will parse the input, construct an AVC-LAN packet, and transmit it on the bus.
+- 1 – Command identifier to send data.
+- 0 – Broadcast bit.
+- 140 – Master address.
+- 440 – Slave address.
+- F – Control field.
+- 04 – Data length (4 bytes).
+- 01 02 03 04 – Data bytes to send.
+- After entering this command, the program will parse the input, construct an AVC-LAN packet, and transmit it on the bus.
 
 ## Pinouts
 By default for TX we can use one of two pins GP2 and GP3 (this is differectial line), for RX using pin GP4

@@ -490,8 +490,9 @@ void handle_send(PIO pio_rx, PIO pio_tx, uint sm_rx, uint sm_tx, uint exec_start
         return;
     }
 
-
+    // Mute RX PIO to prevent Echo
     pio_sm_set_enabled(pio_rx, sm_rx, false);
+
     pio_sm_set_enabled(pio_tx, sm_tx, false);
     pio_sm_exec(pio_tx, sm_tx, exec_start);
 
@@ -545,6 +546,8 @@ void handle_send(PIO pio_rx, PIO pio_tx, uint sm_rx, uint sm_tx, uint exec_start
     // Free the memory allocated by strdup
     free(args_copy);
 
+    // TODO - need to add variable to change value in console
+    // Unmute RX PIO to Enable Listen BUS
     sleep_us(2900); 
     pio_sm_set_enabled(pio_rx, sm_rx, true);
 
