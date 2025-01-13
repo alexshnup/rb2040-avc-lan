@@ -22,6 +22,11 @@ uint32_t LAST_DATA_THRESHOLD = 50000;
 
 #define CMD_BUFFER_SIZE 100
 
+int divideAndCeil(int a, int b) {
+    // Тернарный оператор для корректной обработки отрицательных чисел
+    return (a + b - 1) / b;
+}
+
 // Функция вычисляет нечётный бит чётности для байта.
 // Возвращает 1, если количество единичных битов нечётно, иначе 0.
 uint8_t parity_bit(uint32_t byte) {
@@ -37,7 +42,30 @@ uint8_t parity_bit(uint32_t byte) {
     return parity;
 }
 
-void print_bits(uint32_t value) {
+void print_bits_4(uint8_t value) {
+    value &= 0x0F; // Маска для ограничения до 4 бит
+    for (int i = 3; i >= 0; i--) {
+        printf("%d", (value >> i) & 1);
+    }
+    printf("\n");
+}
+
+void print_bits_8(uint8_t value) {
+    for (int i = 7; i >= 0; i--) {
+        printf("%d", (value >> i) & 1);
+    }
+    printf("\n");
+}
+
+void print_bits_12(uint16_t value) {
+    value &= 0x0FFF; // Маска для ограничения до 12 бит
+    for (int i = 11; i >= 0; i--) {
+        printf("%d", (value >> i) & 1);
+    }
+    printf("\n");
+}
+
+void print_bits_32(uint32_t value) {
     // Iterate over bits from the most significant (31) to the least significant (0)
     for (int i = 31; i >= 0; i--) {
         // Shift value right by i and check the least significant bit
@@ -147,19 +175,19 @@ void process_packet() {
 
     int pos = 0;
     // Extract fields according to the given structure
-    uint8_t start_bit         = extract_bits(pos, 1); pos += 1;
-    uint8_t broadcast_bit     = extract_bits(pos, 1); pos += 1;
+    uint8_t start_bit          = extract_bits(pos, 1); pos += 1;
+    uint8_t broadcast_bit      = extract_bits(pos, 1); pos += 1;
     uint16_t master_address    = reverse_Xbits(extract_bits(pos, 12), 12); pos += 12;
-    uint8_t master_parity     = extract_bits(pos, 1);  pos += 1;
+    uint8_t master_parity      = extract_bits(pos, 1);  pos += 1;
     uint16_t slave_address     = reverse_Xbits(extract_bits(pos, 12), 12); pos += 12;
-    uint8_t slave_parity      = extract_bits(pos, 1);  pos += 1;
-    uint8_t slave_ack         = extract_bits(pos, 1);  pos += 1;
-    uint8_t control_field     = reverse_Xbits(extract_bits(pos, 4), 4);  pos += 4;
-    uint8_t control_parity    = extract_bits(pos, 1);  pos += 1;
-    uint8_t control_ack       = extract_bits(pos, 1);  pos += 1;
-    uint8_t message_count     = reverse_Xbits(extract_bits(pos, 8), 8);  pos += 8;
-    uint8_t message_count_par = extract_bits(pos, 1);  pos += 1;
-    uint8_t message_count_ack = extract_bits(pos, 1);  pos += 1;
+    uint8_t slave_parity       = extract_bits(pos, 1);  pos += 1;
+    uint8_t slave_ack          = extract_bits(pos, 1);  pos += 1;
+    uint8_t control_field      = reverse_Xbits(extract_bits(pos, 4), 4);  pos += 4;
+    uint8_t control_parity     = extract_bits(pos, 1);  pos += 1;
+    uint8_t control_ack        = extract_bits(pos, 1);  pos += 1;
+    uint8_t message_count      = reverse_Xbits(extract_bits(pos, 8), 8);  pos += 8;
+    uint8_t message_count_par  = extract_bits(pos, 1);  pos += 1;
+    uint8_t message_count_ack  = extract_bits(pos, 1);  pos += 1;
 
     // Output fields of the first packet segment
     // printf("Startbit:%u\t", start_bit);
@@ -170,30 +198,34 @@ void process_packet() {
     // printf("Lenght:%u (P:%u, ACK:%u)\n", message_count, message_count_par, message_count_ack);
     printf("%u ", start_bit);
     printf("%u ", broadcast_bit);
-    printf("%03X %u ", master_address, master_parity);
-    // printf("%03X ", master_address, master_parity);
-    printf("%03X %u %u ", slave_address, slave_parity, slave_ack);
-    // printf("%03X ", slave_address, slave_parity, slave_ack);
-    printf("%01X %u %u ", control_field, control_parity, control_ack);
-    // printf("%01X ", control_field, control_parity, control_ack);
-    printf("%02x %u %u", message_count, message_count_par, message_count_ack);
-    // printf("%02u", message_count, message_count_par, message_count_ack);
+    // printf("%03X %u ", master_address, master_parity);
+    printf("%03X ", master_address, master_parity);
+    // printf("%03X %u %u ", slave_address, slave_parity, slave_ack);
+    printf("%03X ", slave_address, slave_parity, slave_ack);
+    // printf("%01X %u %u ", control_field, control_parity, control_ack);
+    printf("%01X ", control_field, control_parity, control_ack);
+    // printf("%02x %u %u", message_count, message_count_par, message_count_ack);
+    printf("%02X", message_count, message_count_par, message_count_ack);
 
 
     uint8_t parity = 0;
     // Output messages
-    for (uint32_t i = 0; i < message_count; ++i) {
+    for (uint8_t i = 0; i < message_count; ++i) {
         if (pos + 10 > bit_length) break; // check for sufficient bits
-        uint8_t message = extract_bits(pos, 8); pos += 8;
+        uint8_t message = reverse_Xbits(extract_bits(pos, 8), 8);  pos += 8;
         uint8_t msg_parity = extract_bits(pos, 1); pos += 1;
         uint8_t msg_ack = extract_bits(pos, 1); pos += 1;
 
-        parity = parity_bit(message) & 0x01;
-        if (parity != msg_parity) {
-            printf(" |ERROR data parity %u is %u not %u|", i, msg_parity, parity);
-        }
-        if (0x01 != msg_ack) {
-            printf(" |ERROR ACK msg_ack|");
+        // из-за особенностей чтения, не  проверяем последний байт если он FF
+        // TODO  пока не понятно что это
+        if (i < (message_count-1) && (message == 0xFF) ) {
+            if (parity_bit(message) != msg_parity) {
+                printf(" |ERROR %02X data parity %u is %u not %u|", message, i, msg_parity, parity_bit(message));
+                print_bits_8(message);
+            }
+            // if (0x01 != msg_ack) {
+            //     printf(" |ERROR %02X ACK msg_ack %u is %u not 1|", message, i, msg_ack);
+            // }
         }
 
         // printf("D:%u:\t%02X (P:%u, ACK:%u)\n", i+1, message, msg_parity, msg_ack);
@@ -221,15 +253,15 @@ void process_packet() {
         printf(" |ERROR message_count parity|");
     }
 
-    if (0x01 != slave_ack) {
-        printf(" |ERROR ACK slave_ack|");
-    }
-    if (0x01 != control_ack) {
-        printf(" |ERROR ACK control_ack|");
-    }
-    if (0x01 != message_count_ack) {
-        printf(" |ERROR ACK message_count_ack|");
-    }
+    // if (0x01 != slave_ack) {
+    //     printf(" |ERROR ACK slave_ack|");
+    // }
+    // if (0x01 != control_ack) {
+    //     printf(" |ERROR ACK control_ack|");
+    // }
+    // if (0x01 != message_count_ack) {
+    //     printf(" |ERROR ACK message_count_ack|");
+    // }
 
 
     // Reset the buffer after processing
@@ -297,7 +329,7 @@ size_t parse_protocol_string(const char* input, uint8_t** output) {
         token = strtok(NULL, delim);
     }
 
-    size_t max_bytes = 512;
+    size_t max_bytes = 1024;
     uint8_t* bytes = (uint8_t*)calloc(max_bytes, sizeof(uint8_t));
     size_t bit_pos = 0;
 
@@ -305,14 +337,14 @@ size_t parse_protocol_string(const char* input, uint8_t** output) {
 
     // 1. Broadcast bit (1 бит)
     if (token_count > 0) {
-        uint32_t broadcast = (uint32_t)strtol(tokens[0], NULL, 10) & 0x01;
+        uint32_t broadcast = (uint8_t)strtol(tokens[0], NULL, 10) & 0x01;
         write_bits(bytes, &bit_pos, broadcast, 1);
     }
 
     // 2. Master address (12 бит)
-    uint16_t master_address = 0xFFF;
+    uint32_t master_address = 0xFFF;
     if (token_count > 1) {
-        master_address = (uint16_t)strtol(tokens[1], NULL, 16) & 0xFFF;
+        master_address = (uint32_t)strtol(tokens[1], NULL, 16) & 0xFFF;
         write_bits(bytes, &bit_pos, master_address, 12);
     }
 
@@ -323,82 +355,94 @@ size_t parse_protocol_string(const char* input, uint8_t** output) {
     }
 
     // 4. Slave address (12 бит)
-    uint16_t slave_address = 0xFFF;
+    uint32_t slave_address = 0xFFF;
     if (token_count > 2) {
-        slave_address = (uint16_t)strtol(tokens[3], NULL, 16) & 0xFFF;
+        slave_address = (uint32_t)strtol(tokens[2], NULL, 16) & 0xFFF;
         write_bits(bytes, &bit_pos, slave_address, 12);
     }
 
     // 5. Бит четности (1 бит)
     if (token_count > 2) {
-        uint8_t parity = parity_bit(slave_address) & 0x01;
+        uint32_t parity = parity_bit(slave_address) & 0x01;
         write_bits(bytes, &bit_pos, parity, 1);
     }
 
     // 6. Бит ACK (1 бит)
     if (token_count > 2) {
-        write_bits(bytes, &bit_pos, 0x01, 1);
+        uint32_t ack_bit = 0x00 & 0x01;
+        write_bits(bytes, &bit_pos, ack_bit, 1);
     }
 
     // 7. Control bits (4 бита)
-    uint8_t control_bits = 0xF;
+    uint32_t control_bits = 0xFF;  // TODO later
     if (token_count > 3) {
-        control_bits = (uint8_t)strtol(tokens[6], NULL, 8) & 0xF;
+        control_bits = (uint32_t)strtol(tokens[3], NULL, 16) & 0x0F;
         write_bits(bytes, &bit_pos, control_bits, 4);
     }
 
     // 8. Бит четности (1 бит)
     if (token_count > 3) {
-        uint8_t parity = parity_bit(control_bits) & 0x01;
+        uint32_t parity = parity_bit(control_bits) & 0x01;
         write_bits(bytes, &bit_pos, parity, 1);
     }
 
     // 9. Бит ACK (1 бит)
-    if (token_count > 3) {
-        write_bits(bytes, &bit_pos, 0x01, 1);
+    if (token_count > 2) {
+        uint32_t ack_bit = 0x00 & 0x01;
+        write_bits(bytes, &bit_pos, ack_bit, 1);
     }
+
 
     // 10. Длина данных (8 бит)
     uint8_t data_length = 0;
     if (token_count > 4) {
-        data_length = (uint8_t)strtol(tokens[9], NULL, 8) & 0xFF;
+        data_length = (uint32_t)strtol(tokens[4], NULL, 16) & 0xFF;
         write_bits(bytes, &bit_pos, data_length, 8);
     }
 
     // 11. Бит четности (1 бит)
     if (token_count > 4) {
-        uint8_t parity = parity_bit(data_length) & 0x01;
+        uint32_t parity = parity_bit(data_length) & 0x01;
         write_bits(bytes, &bit_pos, parity, 1);
     }
 
     // 12. Бит ACK (1 бит)
     if (token_count > 4) {
-        write_bits(bytes, &bit_pos, 0x01, 1);
+        uint32_t ack_bit = 0x00 & 0x01;
+        write_bits(bytes, &bit_pos, ack_bit, 1);
     }
 
     // 11. Обработка байтов данных
     size_t token_index = 5; // Начальный индекс для данных
-    for (uint8_t i = 0; i < data_length; ++i) {
+    for (uint32_t i = 0; i < data_length; ++i) {
         // Удостоверимся, что есть как минимум 10 токенов для каждого байта данных
-        if (token_index + 10 <= token_count) {
+        if ((token_index) <= (token_count)) {
+
             // 11.1. 8 бит данных
-            uint8_t data_byte = (uint8_t)strtol(tokens[token_index], NULL, 8) & 0xFF;
+            uint32_t data_byte = (uint32_t)strtol(tokens[token_index], NULL, 16) & 0xFF;
             write_bits(bytes, &bit_pos, data_byte, 8);
             token_index++;
 
             // 11.2. Бит четности (1 бит)
-            uint8_t parity = parity_bit(data_byte) & 0x01;
+            uint32_t parity = parity_bit(data_byte) & 0x01;
             write_bits(bytes, &bit_pos, parity, 1);
-            token_index++;
 
             // 11.3. Бит ACK (1 бит)
-            write_bits(bytes, &bit_pos, 0x01, 1);
-            token_index++;
+            // только у последнего 1
+            if (i == (data_length-1)) {
+                write_bits(bytes, &bit_pos, 0x01, 1);
+                // printf("\n |Last data byte| \n");
+            } else {
+                write_bits(bytes, &bit_pos, 0x00, 1);
+                // printf("\n |NOT Last data byte| \n");
+            }
         } else {
             // Если токенов недостаточно для очередного байта данных, прерываем цикл.
+            printf("\n |Not Enough bits for Data byte| %u %u\n", token_index, token_count);
             break;
         }
     }
+
 
     free(str);
     *output = bytes;
@@ -580,7 +624,7 @@ int main() {
     // avc_lan_rx_program_init(pio, sm_rx, offset_rx, pin_rx, 125.f);
 
     avc_lan_rx_program_init(pio0_instance_rx, sm_rx, offset_rx, pin_rx, 60);
-    avc_lan_tx_program_init(pio1_instance_tx, sm_tx, offset_tx, pin_tx_high, 400);
+    avc_lan_tx_program_init(pio1_instance_tx, sm_tx, offset_tx, pin_tx_high, 168);
 
     // avc_lan_rx_program_init(pio, sm_rx, offset_rx, pin_rx, 16);
 
@@ -628,7 +672,7 @@ int main() {
 
                     memset(command_line, 0, sizeof(command_line));
                     cmd_index = 0;
-                    printf("> ");  // Приглашение для ввода новой команды
+                    // printf("> ");  // Приглашение для ввода новой команды
                 } else {
                     if (cmd_index < CMD_BUFFER_SIZE - 1) {
                         command_line[cmd_index++] = (char)ch;
@@ -660,8 +704,8 @@ int main() {
 
 
             // // Debug - for bit output 
-            char *bits = byte_to_bit_string(reversed_byte);
-            printf("%s, %llu us\n", bits, delta);
+            // char *bits = byte_to_bit_string(reversed_byte);
+            // printf("%s, %llu us\n", bits, delta);
 
 
             // Update the previous timestamp

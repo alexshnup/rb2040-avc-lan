@@ -16,7 +16,7 @@ main_loop:
     
     ; Set how many times we want to repeat the "start bit".
     ; For example, N=5 (or 10, 20 — at your discretion)
-    set x, 12
+    set x, 31
     ; set x, 30
 
     ; Proceed to insert the "start bit" (long pulse)
@@ -32,38 +32,38 @@ start_bit_loop:
     ; jmp x-- start_bit_loop => jump back while x is not decremented to -1
     jmp x-- start_bit_loop
 
-    nop side 0b10  ; Start bit Tail
-    nop side 0b10  ; Start bit Tail
-    nop side 0b10  ; Start bit Tail
-    nop side 0b10  ; Start bit Tail
-    nop side 0b10  ; Start bit Tail
+    nop side 0b10 [2]  ; Start bit Tail
+    nop side 0b10 [2]  ; Start bit Tail
+    nop side 0b10 [2]  ; Start bit Tail
+    nop side 0b10 [2]  ; Start bit Tail
+    nop side 0b10 [2] ; Start bit Tail
 
 start_send_data:
     out x, 1
-    nop        side 0b01 ; T_sync
-    nop        side 0b01 ; T_sync
-    nop        side 0b01 ; T_sync
-    nop        side 0b01 ; T_sync
-    nop        side 0b01 ; T_sync
-    nop        side 0b01 ; T_sync
+    nop        side 0b01 [2] ; T_sync
+    nop        side 0b01 [2] ; T_sync
+    nop        side 0b01 [2] ; T_sync
+    nop        side 0b01 [2] ; T_sync
+    nop        side 0b01 [2] ; T_sync
+    ; nop        side 0b01 [2] ; T_sync
     jmp !x do_zero
 
 do_one:
     ; x = 1  => direct=1, inverted=0
     ; side=0b01 (binary "01") => pin0=1, pin1=0
-    nop        side 0b10 ; T_data
-    nop        side 0b10 ; T_data
-    nop        side 0b10 ; T_data
-    nop        side 0b10 ; T_data
-    jmp start_send_data  side 0b10 ; Jump, simultaneously indicating Preparation time
+    nop        side 0b10 [2] ; T_data
+    nop        side 0b10 [2] ; T_data
+    nop        side 0b10 [2] ; T_data
+    ; nop        side 0b10 [1] ; T_data
+    jmp start_send_data  side 0b10 [3]; Jump, simultaneously indicating Preparation time
 
 do_zero:
     ; x = 0  => direct=0, inverted=1
     ; side=0b10 (binary "10") => pin0=0, pin1=1
-    nop        side 0b01 ; T_data
-    nop        side 0b01 ; T_data
-    nop        side 0b01 ; T_data
-    jmp start_send_data  side 0b10 ; Jump, simultaneously indicating Preparation time
+    nop        side 0b01 [2] ; T_data
+    nop        side 0b01 [2] ; T_data
+    nop        side 0b01 [1] ; T_data
+    jmp start_send_data  side 0b10 [3]; Jump, simultaneously indicating Preparation time
 
 public stop:
 
@@ -101,8 +101,8 @@ static inline void avc_lan_tx_program_init(PIO pio, uint sm, uint offset, uint p
 ; 
 ; Parameters/constants
 ;
-.define MAX_COUNT      30            
-.define THRESHOLD      20           ; Conditional threshold (in "loop iterations")
+.define MAX_COUNT      31            
+.define THRESHOLD      16           ; Conditional threshold (in "loop iterations")
 ; Parameters (if desired, you can use .define etc.)
 ; For example, we want to push bytes (8 bits).
 ; .shift_right 0        ; shift ISR right on IN command
