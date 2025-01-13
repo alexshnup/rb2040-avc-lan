@@ -23,13 +23,15 @@ Command Breakdown:
 - F – Control field.
 - 04 – Data length (4 bytes).
 - 01 02 03 04 – Data bytes to send.
-- After entering this command, the program will parse the input, construct an AVC-LAN packet, and transmit it on the bus.
+After entering this command, the program will parse the input, construct an AVC-LAN packet, and transmit it on the bus.
 
 ## Pinouts
 By default for TX we can use one of two pins GP2 and GP3 (this is differectial line), for RX using pin GP4
 
 ## Hardware
-I use LM393 Comparator for Receive data, and PCA82C250 CAN-Tranceiver for Transmite data. Later I will make more easier connection. For example we can use both differectial signals with resictors instead PCA82C250. But for Receive data I prefer to use LM393 Hardware Comparator. Later will draw Schematic and add video + pictures.
+- Receive (RX): Uses an LM393 comparator to receive data. The LM393 hardware comparator ensures reliable detection of differential signals.
+- Transmit (TX): Uses a PCA82C250 CAN transceiver to transmit data over the AVC-LAN bus.
+Note: In the future, connections may be simplified, potentially using resistors with differential signals for transmission without the PCA82C250. However, the LM393 comparator will still be preferred for receiving data.
 
 ## Contributing
 
